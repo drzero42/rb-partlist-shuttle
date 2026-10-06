@@ -33,6 +33,7 @@ function server({
   listStatus = 200,
   importFormPath = `/users/abo/partlists/${SCRATCH}/import/`,
   endpointStatus = 200,
+  rewriteOnSubtract = false,
   headings = true,
   chrome = false,
   anchorThisList = true,
@@ -128,12 +129,17 @@ function server({
         const next = have + Number(qty) * (action === 'A' ? 1 : -1);
         if (next > 0) state.set(key, next);
         else state.delete(key);
+        // mimics §12's finding: the server can swap an id during a write while the
+        // line COUNT still comes out even
+        if (action === 'S' && rewriteOnSubtract && key === '48729b,0') state.set('48729a,0', 1);
       }
       return reply(
         200,
         JSON.stringify({
           status: 'success',
-          html: '<table><tr data-part_cat_id="12">ok</tr></table>',
+          html:
+            '<table><tr data-part_cat_id="12">ok</tr><b>Warnings x1 (some parts were CHANGED during import):</b>' +
+            ' Merging 1 x part 4592 in color 1, 1 x part 4593 in color 0 END-OF-WARNINGS</table>',
           renders: { '#user_parts_list': listPage(), '#parts_count': state.size },
         }),
       );
@@ -228,6 +234,23 @@ describe('task0 probe', () => {
     expect(fixtures.calls.filter((call) => call.action === 'S').length).toBeGreaterThan(0);
   });
 
+  it('captures the server warning text in full, not truncated', async () => {
+    const { evidence } = await boot(server()).promise;
+    const warnings = evidence['0.3'].append.warnings;
+    expect(warnings).toContain('some parts were CHANGED during import');
+    expect(warnings).toContain('END-OF-WARNINGS');
+    expect(evidence['0.3'].append.html.length).toBeLessThanOrEqual(320);
+  });
+
+  it('flags an id that was rewritten during cleanup even when counts match', async () => {
+    const fixtures = server({ rewriteOnSubtract: true });
+    const { results, evidence } = await boot(fixtures).promise;
+    const net = results.find((result) => result.id === 'net');
+    expect(net.verdict).toBe('CHECK');
+    expect(net.summary).toMatch(/left behind 48729a,0/);
+    expect(evidence.net.added).toEqual(['48729a,0']);
+  });
+
   it('reports PASS across the probed items for a server that behaves', async () => {
     const fixtures = server();
     const { results } = await boot(fixtures).promise;
@@ -291,6 +314,7 @@ describe('task0 probe', () => {
     expect(verdicts(results)['0.1']).toBe('PASS');
     expect(evidence['0.1'].moldServed).toBe(true);
     expect(evidence['0.1'].items).toHaveLength(2);
+    expect(evidence['0.1'].itemKeys).toEqual(['part_num', 'part_cat_id', 'part_cat_name']);
   });
 
   it('skips 0.1 with the HTML fallback counted when no apiKey is given', async () => {

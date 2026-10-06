@@ -111,18 +111,28 @@ Returns each list's `list_id`, `descr`, `type` (1=used-in-build, 2=not-used),
   names.
 
 ### 4.4 Category resolution (return direction only)
-Batch (verified in docs; confirm in Task 0.1):
 ```
 GET https://rebrickable.com/api/v3/lego/parts/?part_nums=<a>,<b>,<c>&inc_part_details=1&key=<api_key>
 ```
-→ per part: `part_num`, `part_cat_id`, `part_cat_name`.
-- Public catalog endpoint → needs only the **API key** (free), NOT a user token,
-  NOT the password. Still ~1 req/sec; batch via `part_nums`, page with `page_size`
-  up to 1000.
-- **Keyless fallback:** the rendered Part-List page (and the Import response
-  `renders.#user_parts_list`) embeds `data-part_cat_id` / `data-part_cat_name` on
-  each part tile → categories can be scraped from HTML instead (many page-loads,
-  no API key). Default = API; implement fallback.
+**Measured on the real account (Task 0.1, 2026-10-06) — this fails the original
+pass criterion.** HTTP 200, 2/2 parts back, and each item carries `part_num` +
+`part_cat_id` (`3001`→11, `48729b`→32) but **no `part_cat_name`**, even with
+`inc_part_details=1`. Category **ids** are available; names are not.
+
+- **The keyless fallback this section assumed does not exist.** `data-part_cat_id`
+  / `data-part_cat_name` occurred **0 times** on the rendered Part-List page and
+  **0 times** in the import response `html` — the part rows are drawn client-side,
+  so scraping the DOM yields nothing. Any future fallback must target the
+  client-side data source, not the static HTML.
+- **Adopted design:** route on `part_cat_id` alone (the storage invariant is one
+  box per *category*, and ids are stable and comparable), and fetch names with a
+  **single** `GET /api/v3/lego/part_categories/?key=<api_key>` cached for the run —
+  names are only ever needed for the display text of the §6.2 ambiguity prompt.
+- Public catalog endpoint → needs the **API key** (free), NOT a user token, NOT the
+  password. Still ~1 req/sec; batch via `part_nums`, page with `page_size` up to
+  1000.
+- **Consequence:** the return direction now requires an API key, and §9's
+  `categoryMode: dom` option is not implementable. Open decision — see §12.3.
 
 ---
 
@@ -140,11 +150,11 @@ Same endpoint for **Append and Subtract**; differs only by the `action` field:
 ### 5.2 Multipart form fields (exact set to replay)
 | field | value | notes |
 |-------|-------|-------|
-| `csrfmiddlewaretoken` | hidden input value from the current page | read from DOM, NOT the `csrftoken` cookie (masked per-page in Django) |
+| `csrfmiddlewaretoken` | hidden input on the **Part-List page itself** (`/users/<u>/partlists/<id>/`) | Task 0.4: the list page already carries a token, so no separate Import-page fetch is needed; the `csrftoken` cookie is **HttpOnly** (JS cannot read it) so the DOM is the only source; one token served 4 appends + 3 subtracts without re-reading |
 | `action` | `A` or `S` | mode selector |
 | `import_url` | `""` (empty) | file is used instead |
 | `external_source` | `RB` | matches rbpartscsv scheme |
-| `fix_molds` | **OMITTED** | checkbox absent → OFF (literal). MUST be absent per D9. Verify (Task 0.2). |
+| `fix_molds` | **OMITTED** | checkbox absent → OFF. MUST be absent per D9. Task 0.2: verified literal, **and the server echoes `Using settings: Fix Molds = False` in the response `html` — assert that string on every write (§5.3) |
 | `file` | the per-list CSV (`Part,Color,Quantity`) | field name `file` |
 
 Required headers: `X-Requested-With: XMLHttpRequest`; browser adds cookies
@@ -152,15 +162,25 @@ Required headers: `X-Requested-With: XMLHttpRequest`; browser adds cookies
 produced by `FormData`.
 
 ### 5.3 Response
-`application/json`, **synchronous**:
+`application/json`, **synchronous** — measured at 300 rows (Task 0.3, 2026-10-06):
 ```
-{ "status":"success"|"...", "html":"...warnings...", "renders":{ "#user_parts_list":"...", "#parts_count": <int> } }
+{ "status":"success", "msg":"…", "html":"…warnings…",
+  "renders":{ "#user_parts_list":"…", "#parts_count": <int>, "#parts_cost_summary":"…" } }
 ```
-- No polling/progress request observed for a 2-part file.
-- Must parse `status` and surface `html` warnings to the user (never silent).
-- `#parts_count` gives the post-change line count → use for verification (see 7.5).
-- **Task 0.3:** confirm large MOC-sized single files stay synchronous vs becoming
-  a multi-step confirm/progress (would change the atomicity model).
+- **One request per file, even at 300 rows** — no confirm/progress follow-up and no
+  async/task keys in `status`/`msg`/`html`/`renders`, so §6's atomicity model stands.
+  Cost: ~10.6s (append) and ~14.2s (subtract) per 300-row file, so per-box pacing of
+  ~400ms never hit 429 and the progress log (§8) must expect a long wait per box.
+- `html` is the human report, and it carries two machine-useful things: the settings
+  echo (`Using settings: Fix Molds = False`) and **warnings**, e.g.
+  `Warnings x1 (some parts were CHANGED during import): Merging 1 x part 4592 in
+  color 1, 1 x part 4593 in color 0`. Surface verbatim (§7.8) — **untruncated**, the
+  first probe run clipped exactly this message — and treat "CHANGED during import"
+  as a verification failure (§7.5, §12.3).
+- **`#parts_count` is the list's TOTAL QUANTITY, not its line count.** It moved +2 per
+  append of qty 2 while lines moved +1. Never verify against it alone — re-read the
+  `rbpartscsv` and diff `(Part,Color,Qty)` (§7.5).
+- `#parts_cost_summary` is also in `renders`; ignore it (no pricing in scope).
 
 ### 5.4 Verified quantity behaviour
 Round-trip proved Append then Subtract of `48729b,0,2` + `3005,0,2` moved exactly
@@ -230,8 +250,13 @@ box → it must ask. This is the accepted price of "derive live, store nothing"
    affected list (each source box + staging), timestamped, via `GM_download`/blob.
 4. **Sequential + resumable**: requests one at a time; track per-box completion so
    an interrupted run can continue or roll back cleanly.
-5. **Post-write verify**: compare `#parts_count` / re-fetch a list to confirm the
-   intended delta; report mismatches loudly.
+5. **Post-write verify, at id level (mandatory)**: after every write re-fetch that
+   list's `rbpartscsv` and diff the `(Part,Color)` set *and* quantities against the
+   plan — do not trust `#parts_count` (§5.3). Task 0.3 caught the server reporting
+   "some parts were CHANGED during import / Merging …" while the line count
+   round-tripped perfectly, so a count-only check passes on a corrupted result. Any
+   rewritten id or unexpected quantity ⇒ stop the run, report it, offer the exact
+   undo; never start the next box on a failed verify.
 6. **Throttle discipline**: no parallel calls; treat 429 as retry-with-backoff.
 7. **Idempotency guard**: detect if a run is re-applied (e.g. staging already
    contains the MOC rows) and refuse to double-count without explicit override.
@@ -397,14 +422,41 @@ out — which doubles as a check of the pattern against the account's real names
 Record the probe output here before §6 shipping logic is written; no shipping
 logic may land while a row is `pending`.
 
+Run: `tools/task0-probe.js` on Part List **#1125434 `Task0 probe`** (user `drzero`),
+2026-10-06. Box reads during the run were read-only; every write was undone and the
+net-zero check passed (`4 baseline rows, 0 un-undone`).
+
 | item | verdict | outcome / adopted alternative | date |
 |------|---------|-------------------------------|------|
-| 0.1 | pending | | |
-| 0.2 | pending | | |
-| 0.3 | pending | | |
-| 0.4 | pending | | |
+| 0.1 | **FAIL** | `part_cat_id` is returned, **`part_cat_name` is not**, and the DOM fallback is dead (0 `data-part_cat_*` on the list page and in the import `html`). Adopted: route on id + one cached `/lego/part_categories/` call for names (§4.4). Return direction now needs the key — `categoryMode: dom` decision open (§12.3) | 2026-10-06 |
+| 0.2 | **PASS** | omitting `fix_molds` keeps ids literal (`48729b,0` → `48729b,0`, nothing rewritten); the response `html` also echoes `Using settings: Fix Molds = False`, which the tool now asserts per write | 2026-10-06 |
+| 0.3 | **PASS + warning** | 300 rows stayed **one synchronous POST** each way (10.6s / 14.2s, no confirm/progress keys) → atomicity model holds. But the response warned `some parts were CHANGED during import: Merging 1 x part 4592 in color 1, 1 x part 4593 in color 0` **while Fix Molds = False** → §7.5 id-level verification is now mandatory | 2026-10-06 |
+| 0.4 | **PASS** | token read from the Part-List page served 4 appends + 3 subtracts with no re-read; the `csrftoken` cookie is HttpOnly (unreadable from JS), so the DOM is the only possible source (§5.2) | 2026-10-06 |
 | 0.5 | declared | no spare parts in this account (user-declared) → `inc_spares` default **OFF**; not probed | 2026-10-06 |
-| 0.6 | pending | | |
+| 0.6 | **PASS** | `3005,0` + `48729b,0` in ⇄ out byte-for-byte. Caveat found: the rendered list page does **not** contain the mold id (client-side rows), which is why 0.1's scrape failed | 2026-10-06 |
+| D6 scope | **validated** | in scope (9): `15l/Big/Medium/Mini/Small storage boxes`, `Large/Medium/Small condi boxes`, `Sorting boxes`. Out of scope (5): `Bag`, `Ordered from Bricklink`, `Ordered from Lego`, `Unknown placement`, `Used for MOCs`. Staging rename done: `Used for MOCs` (#1125187) | 2026-10-06 |
+
+### 12.3 What Task 0 changed in the design
+
+1. **Verification is id-level, not count-level (§7.5).** The server can report
+   "some parts were CHANGED during import" and still give a clean line count. The
+   apply loop must re-read each written list's `rbpartscsv` and diff
+   `(Part,Color,Qty)` against the plan before touching the next box, and treat a
+   `Merging …` warning as a failed run.
+2. **Categories come from ids + one lookup (§4.4).** `part_cat_name` is not in the
+   parts response; the DOM scrape has nothing to read. Routing uses `part_cat_id`,
+   names use a single cached `/api/v3/lego/part_categories/` call.
+3. **`categoryMode` / `apiKey` are open decisions (§9).** `dom` mode cannot be built
+   as specified, so either (a) the return direction requires a key and the key is no
+   longer optional, or (b) return is dropped from the MVP and consume ships keyless
+   (§15.1 already works without a key). (b) keeps §10's "at most a read-only key"
+   promise weakest — recommended.
+4. **Budget for slow writes (§8).** ~10-14s per 300-row import means the progress log
+   must show which box is in flight; nothing about the plan changes.
+5. **Unknown: which part pairs merge.** `4592`/`4593` came from the user's own box
+   data. Until that is understood, a `missing` verdict in §6.1 may mean "stored under
+   a merged id", so the offender report must show the neighbouring ids in the box
+   (same 5-digit prefix) rather than claiming the part is absent.
 
 ---
 
@@ -424,8 +476,14 @@ Keep behind a config flag. Primary stays the session Import endpoints (D4).
 ## 14. Open technical risks
 
 - Internal import/export URLs undocumented → could change (mitigated by §13).
-- Very large MOCs could exceed the site Import's comfort (mitigated by per-box
-  partition = bounded files + 0.3 verification).
+- Very large MOCs could exceed the site Import's comfort — **measured fine at 300
+  rows** (synchronous, ~10-14s), so partitioning stays as design but the UI must
+  show the wait (§8).
+- **The server can rewrite part ids even with `fix_molds` OFF** (Task 0.3:
+  "Merging 1 x part 4592 in color 1, 1 x part 4593 in color 0"). OFF is necessary
+  but not sufficient for D9/D10: mitigation is §7.5's id-level diff, and a "missing"
+  verdict may really mean "the box stores this under a merged id". Which part pairs
+  merge is catalog data we do not have — see §12.3.
 - Return routing depends on the storage invariant (each category one box). If the
   invariant is ever violated, the tool asks rather than guesses.
 - If a category is entirely consumed (no box has it), return can't infer the home
@@ -439,8 +497,12 @@ Keep behind a config flag. Primary stays the session Import endpoints (D4).
    preview + confirm, backup + verify — no API key needed.
 2. Return the same Custom List back to home boxes via live category inference,
    ambiguity prompts, exact quantities, preview + confirm.
-3. `fix_molds` provably OFF (0.2). Staging + ignore-list classification provably
-   flag-independent and name-based (D5/D6/D7).
+3. `fix_molds` provably OFF (0.2 **passed**, with the server's own
+   `Fix Molds = False` echo asserted per write) **and** post-write id-level
+   verification proving no id was rewritten in practice (0.3 **warned** — see §7.5).
+   Staging + ignore-list classification provably flag-independent and name-based
+   (D5/D6/D7), with the fail-closed `boxNamePattern` **validated against the 15 real
+   lists** (§12.2).
 4. Resumable + throttle-safe sequential writes. No stored password.
 
 ---

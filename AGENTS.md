@@ -20,6 +20,11 @@ spec wins — update this file to match, never the other way.
   ever.
 - **All-or-nothing** (D11): any shortfall → zero writes + offender report. No
   silent partials.
+- **Verify by re-read, at id level** (§7.5): after every write, fetch that list's
+  `rbpartscsv` and diff `(Part,Color,Qty)` against the plan. Task 0.3 caught the
+  server warning "some parts were CHANGED during import / Merging …" while the line
+  count round-tripped clean — and `#parts_count` is a **total quantity, not a line
+  count** (§5.3), so counts prove nothing.
 - **Exact `Part,Color` match only** (D10). No variant/mold fallback guessing.
 - **`Used for MOCs` is data, not the product name** (spec §16.1). It is the
   default of the `stagingName` config key; never hardcode it in list-matching
@@ -123,17 +128,27 @@ module import rules above, the fixture CSV shapes, and the release pipeline.
 `pnpm run build` produces an installable artifact, and the release workflow is
 verified green on a real runner via `workflow_dispatch`.
 
-**Task 0 is not done**: the probe exists and is tested against a fake server, but
-0.1–0.6 can only be settled in the user's logged-in browser. §12.2 is all
-`pending`, so §6 logic must not be implemented yet.
+**Task 0 is done** (2026-10-06, recorded in spec §12.2): 0.2/0.3/0.4/0.6 PASS,
+0.5 DECLARED, **0.1 FAIL**, and 0.3 came with a warning. §12.3 lists what that
+changed — read it before touching `rb-category.js` or the apply loop.
+
+Confirmed by measurement, so the stubs are no longer guesses:
+- `rb-read.js`/`rb-write.js` response shapes are as now-documented in §5.2/§5.3
+  (`status`/`msg`/`html`/`renders`; one synchronous POST at 300 rows, ~10-14s).
+- The CSRF token comes from the Part-List page; the cookie is HttpOnly.
+- `boxNamePattern` (`\bbox(?:es)?\b`) is validated against all 15 real lists.
+
+Needs rework before implementation:
+- `rb-category.js`: `part_cat_name` is not returned and there are no
+  `data-part_cat_*` attributes to scrape — route on `part_cat_id`, get names from
+  one cached `/lego/part_categories/` call, and settle the §12.3 `categoryMode`
+  decision (drop the return direction, or make the API key required).
+- `safety.js`: §7.5 verification is now id-level and mandatory.
 
 Next up per spec:
-1. Task 0 verification (spec §12) against a scratch Part List; record results
-   in the spec before shipping logic.
+1. Settle the §12.3 open decision (recommendation there).
 2. `csv.js` + `reconcile.js` with tests (fixture CSVs already in
    `test/fixtures/`), then I/O layers, then UI — replacing the stubs module by
    module and loosening the export-surface test as each contract settles.
-
-Note: the stub contracts for `rb-category.js`, `safety.js` and `ui.js` were
-written before Task 0 ran, so treat their exact signatures as provisional until
-0.1–0.6 confirm the response shapes they assume.
+3. The 4592/4593 merge seen in 0.3 is still unexplained — until it is, §6.1's
+   `missing` verdict must not claim a part is absent without showing near-miss ids.

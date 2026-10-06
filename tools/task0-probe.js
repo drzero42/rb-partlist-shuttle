@@ -144,6 +144,10 @@
         partsCount: json?.renders?.['#parts_count'],
         catAttributes: ((json?.html || '').match(/data-part_cat_(?:id|name)/g) || []).length,
         html: json?.html ? json.html.replace(/\s+/g, ' ').slice(0, 300) : null,
+        // Full, untruncated server text: §12 showed a real-run warning ("some parts
+        // were CHANGED during import") getting cut off at 300 chars, which is the
+        // one message the operator must see verbatim (§7.8).
+        warnings: json?.html ? decodeEntities(json.html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim() : null,
         notJson: json ? null : text.replace(/\s+/g, ' ').slice(0, 160),
       };
     }
@@ -417,7 +421,8 @@
             `mold id ${cfg.mold[0]} served by the catalog=${moldServed} (${moldServed ? 'so ids exist upstream' : 'so mold ids are list-local only — D9/D10'}); ` +
             `HTML fallback: ${pageAttributes} page / ${renderProbe.catAttributes} import-response attributes`,
           {
-            items: items.map(({ part_num, part_cat_id, part_cat_name }) => ({ part_num, part_cat_id, part_cat_name })),
+            items,
+            itemKeys: items[0] ? Object.keys(items[0]) : null,
             listPageAttributes: pageAttributes,
             importHtmlAttributes: renderProbe.catAttributes,
             moldServed,
@@ -529,14 +534,25 @@
     if (!finalRows) {
       record('net', 'SKIP', `list could not be re-read after cleanup — check "${listName}" by hand`);
     } else {
-      const drift = finalRows.length - baseline.length;
+      // Compare IDS, not just row counts: §12 caught the server reporting
+      // "some parts were CHANGED during import" while the line count came out
+      // clean, so a count-only check would have called that a perfect round-trip.
+      const startKeys = new Set(baseline.map(keyOf));
+      const endKeys = new Set(finalRows.map(keyOf));
+      const added = [...endKeys].filter((k) => !startKeys.has(k));
+      const removed = [...startKeys].filter((k) => !endKeys.has(k));
+      const clean = !added.length && !removed.length && finalRows.length === baseline.length && !unUndone;
       record(
         'net',
-        drift === 0 && !unUndone ? 'PASS' : 'CHECK',
-        drift === 0 && !unUndone
-          ? `scratch list is back to its ${baseline.length} baseline rows after ${cfg.delayMs}ms-paced sequential writes`
-          : `list is ${drift > 0 ? '+' : ''}${drift} rows vs baseline${unUndone ? `, ${unUndone} write(s) not undone` : ''} — tidy "${listName}" by hand before trusting this run`,
-        { baseline: baseline.length, final: finalRows.length, unUndone },
+        clean ? 'PASS' : 'CHECK',
+        clean
+          ? `scratch list is byte-for-byte back to its ${baseline.length} baseline rows (${cfg.delayMs}ms-paced sequential writes)`
+          : `list did not round-trip: ${finalRows.length} rows vs baseline ${baseline.length}; ` +
+            `${added.length ? `left behind ${added.slice(0, 6).join(', ')}; ` : ''}` +
+            `${removed.length ? `lost ${removed.slice(0, 6).join(', ')}; ` : ''}` +
+            (unUndone ? `${unUndone} write(s) not undone; ` : '') +
+            `— tidy "${listName}" by hand before trusting this run`,
+        { baseline: baseline.length, final: finalRows.length, unUndone, added, removed },
       );
     }
 
