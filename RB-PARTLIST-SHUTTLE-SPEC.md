@@ -349,11 +349,16 @@ Task-0 on the user's real boxes until 0.1–0.6 pass.
 
 `tools/task0-probe.js` automates 0.1–0.6. Paste it into the DevTools console on
 the **Import page of a scratch Part List** (`/users/<u>/partlists/<id>/importparts/`)
-and call `__task0({ boxListIds: ['<one box id>'] })` — recommended: the account has
-15 Part Lists, and without a scope the probe walks every sidebar link (~30 reads)
-just to find a large list for 0.3. `__task0()` walks the sidebar; adding
-`apiKey` includes the 0.1 v3 check. It Appends, reads back, Subtracts, and prints
-a verdict table plus JSON evidence.
+and call `__task0()`. It Appends, reads back, Subtracts, and prints a verdict table
+plus JSON evidence.
+
+**Any tab of the scratch list works.** The probe takes the list id from the current
+URL (or an explicit `{ listUrl }`), then fetches the Import page itself for its
+CSRF token and scrapes the Part-List sidebar out of that HTML — so it does not
+depend on which tab it was pasted into, and it refuses with the pathname it saw
+rather than a mystery error. The box lists it reads come from that scrape filtered
+by `boxNamePattern` (D6), and the report's `scope` block names what it put in and
+out — which doubles as a check of the pattern against the account's real names.
 
 - It refuses to write unless the list NAME matches `/^(task\s*0|scratch|probe|test)/i`
   and requires a typed `TASK0` gate — the §12 "never against real boxes" rule enforced
@@ -361,8 +366,9 @@ a verdict table plus JSON evidence.
   probe needs no copy of `stagingName` (§16.1); box candidates are filtered by the same
   `boxNamePattern` rule D6 will ship with, and the report lists what it put out of
   scope so a wrong pattern is visible.
-- Box lists are touched **read-only** (for 0.3's row source, scoped by `boxListIds` or
-  by `boxNamePattern` on the sidebar walk); the only list written
+- Box lists are touched **read-only** (for 0.3's row source, filtered by
+  `boxNamePattern`, or scoped with `{ boxListIds: ['<id>'] }` to name one explicitly);
+  the only list written
   to is the scratch list, and every accepted Append is subtracted again, with a
   net-zero row-count check after cleanup.
 - Sequential + 429-backoff (§7.6), 400ms pacing; `fix_molds` is never sent and the

@@ -39,9 +39,18 @@ function server({ normalize = (part) => part, listName = 'Task0 probe', spares =
 
   const toCsv = (rows) => ['Part,Color,Quantity', ...rows.map((row) => row.join(','))].join('\r\n') + '\r\n';
   const scratchCsv = () => toCsv([...state].map(([key, qty]) => [...key.split(','), String(qty)]));
+  const sidebar = () =>
+    `<a href="/users/abo/partlists/">My Part Lists</a>` +
+    `<a href="/users/abo/partlists/${SCRATCH}/">Task0 probe</a>` +
+    `<a href="/users/abo/partlists/${BOX}/">Bricks box (25 parts)</a>` +
+    `<a href="/users/abo/partlists/${BOX2}/">Technic box (30 parts)</a>` +
+    `<a href="/users/abo/partlists/999/">Ordered from Lego &amp; Bricklink</a>` +
+    `<a href="/users/abo/lists/4242/">A Custom List</a>`;
   const listPage = () =>
-    `<html><body><h1 class="d-inline">${listName}</h1>` +
+    `<html><body><h1 class="d-inline">${listName}</h1>${sidebar()}` +
     `${[...state.keys()].map((key) => `<a href="/p/${key}" data-part_cat_id="1" data-part_cat_name="Bricks"></a>`).join('')}</body></html>`;
+  const importPage = () =>
+    `<html><body><h1>${listName}</h1><form><input type="hidden" name="csrfmiddlewaretoken" value="${CSRF}"></form>${sidebar()}</body></html>`;
 
   async function fetchImpl(url, init = {}) {
     const target = new URL(url, 'https://rebrickable.com');
@@ -56,6 +65,7 @@ function server({ normalize = (part) => part, listName = 'Task0 probe', spares =
       };
     };
 
+    if (init.method !== 'POST' && pathname === `/users/abo/partlists/${SCRATCH}/importparts/`) return reply(200, importPage());
     if (init.method !== 'POST' && pathname === `/users/abo/partlists/${SCRATCH}/`) return reply(200, listPage());
 
     const parts = pathname.match(/^\/users\/abo\/partlists\/(\d+)\/parts\/$/);
@@ -123,22 +133,15 @@ function server({ normalize = (part) => part, listName = 'Task0 probe', spares =
 }
 
 /** Boot the probe against a fake server. `window` must be a real object: the probe writes to it. */
-function boot(fixtures, options = {}, gate = () => 'TASK0') {
+function boot(fixtures, options = {}, gate = () => 'TASK0', pathname = `/users/abo/partlists/${SCRATCH}/importparts/`) {
   const logs = [];
   const sandbox = {
     window: {},
     console: { log: (...args) => logs.push(args.join(' ')), warn: vi.fn(), error: vi.fn() },
-    location: { pathname: `/users/abo/partlists/${SCRATCH}/importparts/`, origin: 'https://rebrickable.com' },
-    document: {
-      cookie: `csrftoken=${COOKIE}`,
-      querySelector: (selector) => (selector.includes('csrfmiddlewaretoken') ? { value: CSRF } : null),
-      querySelectorAll: () => [
-        { getAttribute: () => `/users/abo/partlists/${SCRATCH}/`, textContent: 'Task0 probe' },
-        { getAttribute: () => `https://rebrickable.com/users/abo/partlists/${BOX}/`, textContent: ' Bricks box ' },
-        { getAttribute: () => `/users/abo/partlists/${BOX2}/`, textContent: ' Technic box ' },
-        { getAttribute: () => '/users/abo/lists/999/', textContent: 'A Custom List' },
-      ],
-    },
+    location: { pathname, origin: 'https://rebrickable.com', href: `https://rebrickable.com${pathname}` },
+    // only `cookie` is read now: the probe takes its token and its sidebar from
+    // fetched HTML, so it no longer depends on which tab it was pasted into.
+    document: { cookie: `csrftoken=${COOKIE}` },
     navigator: { clipboard: { writeText: async () => {} } },
     fetch: fixtures.fetch,
     URL,
@@ -270,6 +273,34 @@ describe('task0 probe', () => {
     expect(verdicts(results)['0.1']).toBe('SKIP');
     expect(evidence['0.1'].listPageAttributes).toBeGreaterThan(0);
     expect(evidence['0.1'].importHtmlAttributes).toBeGreaterThan(0);
+  });
+
+  it('runs from any tab of the list, not just the Import page', async () => {
+    for (const pathname of [`/users/abo/partlists/${SCRATCH}/`, `/users/abo/partlists/${SCRATCH}/parts/`]) {
+      const fixtures = server();
+      const { results } = await boot(fixtures, {}, () => 'TASK0', pathname).promise;
+      expect(verdicts(results)['0.2']).toBe('PASS');
+      expect(fixtures.calls.some((call) => call.url.includes('/importparts/'))).toBe(true);
+    }
+  });
+
+  it('accepts an explicit listUrl from an unrelated page', async () => {
+    const fixtures = server();
+    const { results } = await boot(fixtures, { listUrl: `/users/abo/partlists/${SCRATCH}/` }, () => 'TASK0', '/mocs/search/').promise;
+    expect(verdicts(results).net).toBe('PASS');
+  });
+
+  it('names the page it refused when the URL is not a Part List', async () => {
+    const fixtures = server();
+    const { promise } = boot(fixtures, {}, () => 'TASK0', '/settings/api/');
+    await expect(promise).rejects.toThrow(/this page \(\/settings\/api\/\) is not one of your Part Lists/);
+    expect(posts(fixtures.calls)).toHaveLength(0);
+  });
+
+  it('scrapes box links by name and puts the rest out of scope (D6)', async () => {
+    const { evidence } = await boot(server()).promise;
+    expect([...evidence.scope.inScope].sort()).toEqual(['Bricks box (25 parts)', 'Technic box (30 parts)']);
+    expect(evidence.scope.outOfScope).toContain('Ordered from Lego & Bricklink');
   });
 
   it('refuses a list that is not a scratch list, without writing', async () => {

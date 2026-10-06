@@ -11,11 +11,13 @@
  *   1. Create a Part List named like `Task0 probe` and put a handful of parts in it.
  *   2. Open its Import page while logged in:
  *        https://rebrickable.com/users/<you>/partlists/<id>/importparts/
- *   3. DevTools → Console → paste this whole file. Then:
+ *   3. DevTools → Console → paste this whole file, on ANY tab of that list (the
+ *    probe fetches the Import page itself for its CSRF token). Then:
  *        __task0({ boxListIds: ['<one box id>'] })  // recommended: with 15 Part
  *                                                   // Lists, don't walk the sidebar
  *        __task0()                                  // full sidebar walk
  *        __task0({ apiKey: '<catalog key>' })       // also runs 0.1 via the v3 API
+ *        __task0({ listUrl: '/users/<you>/partlists/<id>/' })  // run from elsewhere
  *
  * 0.5 (inc_spares) is DECLARED, not probed: this account tracks no spare parts,
  * so reading every box twice proves nothing — see §12 0.5.
@@ -36,6 +38,8 @@
     backoffs: [1000, 2000, 4000],
     bigRows: 300,
     apiKey: '',
+    /** Run from anywhere: point at the scratch list explicitly. */
+    listUrl: '',
     /** 0.3 reads these box lists only — with 15 Part Lists, walking the sidebar is ~30 wasted GETs. */
     boxListIds: null,
     /** §12 0.5: this account has no spare parts, so the double read proves nothing. Opt in to compare one list anyway. */
@@ -56,6 +60,14 @@
       .join('\r\n')
       .concat('\r\n');
   }
+
+  const decodeEntities = (value) =>
+    String(value)
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
 
   function parseCsv(text) {
     const lines = String(text)
@@ -164,16 +176,26 @@
       return left;
     }
 
-    /* ---- where are we? ---- */
-    const found = location.pathname.match(/^\/users\/([^/]+)\/partlists\/(\d+)\/importparts\/?$/);
-    if (!found) {
-      throw new Error('open the scratch Part List Import page first: /users/<you>/partlists/<id>/importparts/');
+    /* ---- which list? any tab of it will do (§12.1) ---- */
+    // Demanding the exact Import URL made the runbook brittle: one wrong tab and
+    // the probe refused. Accept any /users/<u>/partlists/<id>/… page (or an
+    // explicit listUrl) and FETCH the Import page for its CSRF token.
+    const listTarget = (value) => {
+      const match = new URL(value, location.href).pathname.match(
+        /^\/users\/([^/]+)\/partlists\/(\d+)(?:\/.*)?$/,
+      );
+      return match ? { user: decodeURIComponent(match[1]), listId: match[2] } : null;
+    };
+    const target = (cfg.listUrl ? listTarget(cfg.listUrl) : null) || listTarget(location.pathname);
+    if (!target) {
+      throw new Error(
+        `this page (${location.pathname}) is not one of your Part Lists — open ` +
+          "/users/<you>/partlists/<id>/ (any tab works) or pass { listUrl: '…' }",
+      );
     }
-    const user = decodeURIComponent(found[1]);
-    const listId = found[2];
-    const csrf = document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || '';
+    const { user, listId } = target;
+    const importPageUrl = `/users/${user}/partlists/${listId}/importparts/`;
     const cookieToken = (document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/) || [])[1] || '';
-    if (!csrf) throw new Error('no csrfmiddlewaretoken input here — is this the Import form?');
 
     const readScratch = async () => {
       const response = await request(`/users/${user}/partlists/${listId}/parts/?format=rbpartscsv&inc_spares=0`);
@@ -183,6 +205,12 @@
 
     /* ---- scratch-list guard (§12) ---- */
     const page = await (await request(`/users/${user}/partlists/${listId}/`)).text();
+    const importHtml = await (await request(importPageUrl)).text();
+    const csrf =
+      (importHtml.match(/name=["']csrfmiddlewaretoken["']\s+value=["']([^"']+)["']/i) ||
+        importHtml.match(/value=["']([^"']+)["']\s+name=["']csrfmiddlewaretoken["']/i) ||
+        [])[1] || '';
+    if (!csrf) throw new Error(`no csrfmiddlewaretoken on ${importPageUrl} — logged in? list exists?`);
     const listName =
       ((page.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '')
         .replace(/<[^>]+>/g, ' ')
@@ -322,17 +350,16 @@
           if (String(id) !== listId) boxLinks.set(String(id), `#${id}`);
         }
       } else {
-        for (const anchor of document.querySelectorAll('a[href]')) {
-          const match = new URL(anchor.getAttribute('href'), location.origin).pathname.match(
-            /^\/users\/[^/]+\/partlists\/(\d+)\/?$/,
-          );
-          if (match && match[1] !== listId) {
-            const name = anchor.textContent.replace(/\s+/g, ' ').trim();
-            // D6 fail-closed: a list this probe cannot recognise as a box is not a
-            // source, even though reading it would be harmless.
-            if (cfg.boxNamePattern.test(name)) boxLinks.set(match[1], name);
-            else outOfScope.push(name);
-          }
+        // Scrape the sidebar out of the fetched HTML, so the probe behaves the
+        // same whichever page it was pasted on.
+        for (const anchor of page.matchAll(/href=["']\/users\/[^/]+\/partlists\/(\d+)\/?[^"']*["'][^>]*>([^<]{1,120})</gi)) {
+          const [, id, raw] = anchor;
+          if (id === listId || !raw.trim()) continue;
+          const name = decodeEntities(raw).replace(/\s+/g, ' ').trim();
+          // D6 fail-closed: a list this probe cannot recognise as a box is not a
+          // source, even though reading it would be harmless.
+          if (cfg.boxNamePattern.test(name)) boxLinks.set(id, name);
+          else if (!outOfScope.includes(name)) outOfScope.push(name);
         }
       }
 
