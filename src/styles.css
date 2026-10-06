@@ -1,0 +1,45 @@
+/*
+ * Injected verbatim by gm.addStyle from the esbuild text loader (spec §8, §16.2).
+ * Every selector is prefixed `.rbps-` so nothing collides with Rebrickable's own
+ * markup. Placeholder rules only — real styling lands with the ui.js work.
+ */
+
+.rbps-toolbar {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.rbps-btn {
+  cursor: pointer;
+  font: inherit;
+}
+
+.rbps-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rbps-modal {
+  max-width: 720px;
+  max-height: 80vh;
+  overflow: auto;
+}
+
+.rbps-modal table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.rbps-log {
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
+}
+
+.rbps-warn {
+  font-weight: 600;
+}

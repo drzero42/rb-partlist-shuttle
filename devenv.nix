@@ -11,9 +11,9 @@
     echo "node $(node --version) | pnpm $(pnpm --version)"
   '';
 
-  # `devenv test` — toolchain sanity until package.json exists; then switch to pnpm test.
+  # `devenv test` — the real suite now that package.json exists.
   tasks."devenv:enterTest".exec = ''
-    node --version
-    pnpm --version
+    pnpm install --frozen-lockfile
+    pnpm test
   '';
 }
