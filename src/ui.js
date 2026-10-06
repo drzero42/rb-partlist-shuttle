@@ -7,7 +7,7 @@
  * `matchCustomListPage` narrows it at runtime. Part List pages
  * (`/users/<u>/partlists/<id>/`) must NOT match.
  *
- * Naming rule (§16.1): `Used for MOCs` is DATA. Button labels interpolate the
+ * Naming rule (§16.1): the staging list NAME is data. Button labels interpolate the
  * configured `stagingName`; no code path here may hardcode it or swap in the
  * product name.
  *

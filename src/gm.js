@@ -30,15 +30,18 @@ export const MANAGER_API = Object.freeze({
  * Config schema, spec §9.
  *
  * @typedef {object} ShuttleConfig
- * @property {string} stagingName    exact-match staging Part List name (D5)
- * @property {string[]} ignoreLists  Part List names that are neither box nor staging (D7)
- * @property {'api'|'dom'} categoryMode  category source for the return direction (§4.4)
- * @property {string} apiKey         public catalog key; empty ⇒ `dom` mode is forced
- * @property {boolean} defaultDryRun always preview before writing (§7.1)
+ * @property {string} stagingName     exact-match staging Part List name (D5) — the
+ *                                    single source of that name (§16.1)
+ * @property {string} boxNamePattern  regex SOURCE for lists that count as boxes (D6)
+ * @property {string[]} ignoreLists   names excluded after the pattern matched (D7)
+ * @property {'api'|'dom'} categoryMode category source for the return direction (§4.4)
+ * @property {string} apiKey          public catalog key; empty ⇒ `dom` mode is forced
+ * @property {boolean} defaultDryRun  always preview before writing (§7.1)
  */
 
 export const CONFIG_DEFAULTS = Object.freeze({
   stagingName: 'Used for MOCs',
+  boxNamePattern: '\\bbox(?:es)?\\b',
   ignoreLists: Object.freeze([]),
   categoryMode: 'api',
   apiKey: '',

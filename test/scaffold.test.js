@@ -166,8 +166,10 @@ describe('unimplemented stubs announce themselves', () => {
 
   it('reconcile.js', async () => {
     const reconcile = await import('../src/reconcile.js');
+    // arbitrary values: the point is the throw, not the name (§16.1 keeps the
+    // staging name in gm.js only)
     expect(() =>
-      reconcile.classifyLists([], { stagingName: 'Used for MOCs', ignoreLists: [] }),
+      reconcile.classifyLists([], { stagingName: 'Staging', boxNamePattern: 'box', ignoreLists: [] }),
     ).toThrow(/^NotImplemented: /);
     expect(() => reconcile.planConsume({})).toThrow(/^NotImplemented: /);
     expect(() => reconcile.planReturn({})).toThrow(/^NotImplemented: /);
@@ -230,17 +232,56 @@ describe('import rules (AGENTS.md)', () => {
   });
 });
 
+/**
+ * Read the §9 config table. The spec is the source of the documented defaults
+ * (§16.1), so the tests read the values here instead of restating them — renaming
+ * the staging list then touches gm.js and the spec, never the test suite.
+ */
+function specConfigDefaults() {
+  const spec = readFileSync(new URL('../RB-PARTLIST-SHUTTLE-SPEC.md', import.meta.url), 'utf8');
+  const section = spec.slice(spec.indexOf('## 9. Config keys'), spec.indexOf('No username/password stored'));
+  const defaults = {};
+  for (const [, key, cell] of section.matchAll(/^\| `([A-Za-z]+)` \| (.+?) \|.*$/gm)) {
+    const text = cell.trim().replace(/^`(.*)`$/, '$1').trim();
+    if (text === '[]') defaults[key] = [];
+    else if (text === '(empty)') defaults[key] = '';
+    else if (text === 'true' || text === 'false') defaults[key] = text === 'true';
+    else defaults[key] = (text.match(/`([^`]+)`/) || [, text])[1];
+  }
+  return defaults;
+}
+
 describe('frozen spec constants', () => {
-  it('§9 config keys and defaults', async () => {
+  it('§9 config keys and defaults match the spec table', async () => {
     const gm = await import('../src/gm.js');
-    expect(gm.CONFIG_DEFAULTS).toEqual({
-      stagingName: 'Used for MOCs',
-      ignoreLists: [],
-      categoryMode: 'api',
-      apiKey: '',
-      defaultDryRun: true,
-    });
+    const expected = specConfigDefaults();
+    expect(Object.keys(expected).length).toBeGreaterThan(4);
+    expect({ ...gm.CONFIG_DEFAULTS }).toEqual(expected);
     expect(gm.configKeys().sort()).toEqual(Object.keys(gm.CONFIG_DEFAULTS).sort());
+  });
+
+  it('names the staging list in exactly one code file (§16.1)', async () => {
+    const gm = await import('../src/gm.js');
+    const needle = gm.CONFIG_DEFAULTS.stagingName;
+    const sources = [
+      ...readdirSync(SRC).filter((f) => f.endsWith('.js')).map((f) => [f, code(f)]),
+      ['tools/task0-probe.js', stripComments(readFileSync(new URL('../tools/task0-probe.js', import.meta.url), 'utf8'))],
+    ];
+    expect(sources.filter(([, src]) => src.includes(needle)).map(([name]) => name)).toEqual(['gm.js']);
+  });
+
+  it('boxNamePattern is a compilable regex source, not a wildcard (D6)', async () => {
+    const gm = await import('../src/gm.js');
+    const source = gm.CONFIG_DEFAULTS.boxNamePattern;
+    expect(() => new RegExp(source, 'i')).not.toThrow();
+    const pattern = new RegExp(source, 'i');
+    expect(pattern.test('Big storage boxes')).toBe(true);
+    expect(pattern.test('Sorting box')).toBe(true);
+    expect(pattern.test('Mini box')).toBe(true);
+    expect(pattern.test('Matchbox cars')).toBe(false);
+    for (const name of ['Ordered from Lego', 'Ordered from Bricklink', 'Unknown placement', 'Bag', 'Used in MOCs', 'Task0 probe']) {
+      expect(pattern.test(name)).toBe(false);
+    }
   });
 
   it('§5.2 import form fields — fix_molds is forbidden (D9)', async () => {

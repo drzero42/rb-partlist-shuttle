@@ -47,8 +47,8 @@ Non-goals (explicitly out of scope):
 | D3 | Read format | `Part,Color,Quantity` (numeric RB color ids). Confirmed. No category column. |
 | D4 | Write path | Rebrickable site **Import** `Subtract`/`Append` endpoints (NOT the v3 API for writes). One synchronous request per affected list. |
 | D5 | Staging identity | `Used for MOCs` Part List identified by **exact configured name** (default `Used for MOCs`). NOT by build-type flag (avoids breaking the user's Assembled/Custom-List semantics and avoids guessing if multiple lists share a flag). |
-| D6 | Box identity | Any Part List that is **not** the staging list and **not** on the **ignore-list** is a candidate **box**. The tool is **flag-agnostic** (build-type flags are left to the user for Rebrickable's own build math). |
-| D7 | Ignore-list | Name-based list of Part Lists to treat as neither box nor staging (e.g. Spares/Wishlist). Default: empty → every non-staging list is a box. |
+| D6 | Box identity | **Fail-closed.** A Part List is a candidate **box** only if its name matches `boxNamePattern` AND it is not the staging list AND it is not on `ignoreLists`. A list the tool cannot recognise as a box is never treated as stock on hand — that is what keeps pending-order lists and wishlists from satisfying a consume plan. Still **flag-agnostic**: build-type flags stay the user's business (§4.3). |
+| D7 | Ignore-list | Name-based exclusion applied **after** `boxNamePattern`, for lists that match the pattern but must not be drawn from (e.g. a future `Boxes — order 4513`). Out-of-scope lists are named in the preview (§8) so a wrong pattern never silently shrinks inventory. |
 | D8 | Category→box map | **Derived live, never hardcoded**, re-built each run from current box contents + resolved categories. Self-updates when a category is re-shelved to a different box type. |
 | D9 | Molds | **`fix_molds` OFF (literal)** on every write. The tool must not rewrite part numbers (e.g. must NOT turn `48729b`→`3484`). |
 | D10 | Variant matching | **Exact `Part,Color` match only.** No mold/print/alternate fallback. A real variant mismatch surfaces as "missing → abort" (see D11) so the user resolves it, not the tool. |
@@ -105,7 +105,8 @@ GET https://rebrickable.com/api/v3/users/<user_token>/partlists/?key=<api_key>
 ```
 Returns each list's `list_id`, `descr`, `type` (1=used-in-build, 2=not-used),
 `qty`. The tool uses this ONLY to enumerate Part Lists + ids. Classification is by
-**name/ignore-list**, not `type` (per D5/D6).
+**name** — `boxNamePattern` for boxes, exact `stagingName` for staging, then
+`ignoreLists` — never by `type` (per D5/D6/D7).
 - Alternative (no v3 key): scrape `MY LEGO → My Part Lists` sidebar for links +
   names.
 
@@ -255,13 +256,30 @@ box → it must ask. This is the accepted price of "derive live, store nothing"
 
 | key | default | purpose |
 |-----|---------|---------|
-| `stagingName` | `Used for MOCs` | exact-match staging list name |
-| `ignoreLists` | `[]` | Part List names to treat as neither box nor staging |
+| `stagingName` | `Used for MOCs` | exact-match staging list name — **the single source of that name** (§16.1) |
+| `boxNamePattern` | `\bbox(?:es)?\b` | regex SOURCE (compiled `i`) for the lists that count as boxes; fail-closed (D6). `?` must sit on the `(es)`, not on the `s`: `\bboxes?\b` matches "boxes" but not "box" |
+| `ignoreLists` | `[]` | names excluded AFTER `boxNamePattern` matched (D7) |
 | `categoryMode` | `api` (else `dom`) | category source for return |
 | `apiKey` | (empty) | public catalog key for category batch (return only) |
 | `defaultDryRun` | `true` | always preview |
 
 No username/password stored. API key only for return-direction category reads.
+`boxNamePattern` is stored as a **string** because GM storage is JSON; code compiles
+it with the `i` flag and must fail loudly on an invalid pattern rather than fall
+back to matching everything.
+
+Account facts (2026-10-06, from the user's 15 Part Lists):
+- **In scope as boxes** (name matches `boxNamePattern`): `15l storage boxes`,
+  `Big storage boxes`, `Large condi boxes`, `Medium condi boxes`,
+  `Medium storage boxes`, `Mini storage boxes`, `Small condi boxes`,
+  `Small storage boxes`, `Sorting boxes`.
+- **Out of scope by design**: `Ordered from Bricklink`, `Ordered from Lego`
+  (stock not yet received), `Unknown placement` (parts that cannot be located),
+  `Bag` (a working pile, emptied as collection modernization proceeds — user
+  chose to ignore it), `Task0 probe` (scratch), staging.
+- **Staging rename pending**: the account's list is currently named
+  `Used in MOCs`; it will be renamed to match `stagingName`, because the code
+  defines that name exactly once and the tool matches it exactly (D5).
 
 ---
 
@@ -337,10 +355,14 @@ just to find a large list for 0.3. `__task0()` walks the sidebar; adding
 `apiKey` includes the 0.1 v3 check. It Appends, reads back, Subtracts, and prints
 a verdict table plus JSON evidence.
 
-- It refuses to write unless the list NAME matches `/^(task\s*0|scratch|probe|test)/i`,
-  refuses the staging name outright, and requires a typed `TASK0` gate — the §12
-  "never against real boxes" rule enforced in code, not just in prose.
-- Box lists are touched **read-only** (for 0.3's row source); the only list written
+- It refuses to write unless the list NAME matches `/^(task\s*0|scratch|probe|test)/i`
+  and requires a typed `TASK0` gate — the §12 "never against real boxes" rule enforced
+  in code, not just in prose. Because that pattern can never match a staging name, the
+  probe needs no copy of `stagingName` (§16.1); box candidates are filtered by the same
+  `boxNamePattern` rule D6 will ship with, and the report lists what it put out of
+  scope so a wrong pattern is visible.
+- Box lists are touched **read-only** (for 0.3's row source, scoped by `boxListIds` or
+  by `boxNamePattern` on the sidebar walk); the only list written
   to is the scratch list, and every accepted Append is subtracted again, with a
   net-zero row-count check after cleanup.
 - Sequential + 429-backoff (§7.6), 400ms pacing; `fix_molds` is never sent and the
@@ -404,7 +426,7 @@ Keep behind a config flag. Primary stays the session Import endpoints (D4).
 
 ## 16. Naming & userscript metadata
 
-### 16.1 The name
+### 16.1 The name and its single source
 
 | Where | Value |
 |-------|-------|
@@ -428,6 +450,16 @@ Naming rule going forward: **`Used for MOCs` is data, not the product name.** It
 the default value of the `stagingName` config key (D5/§9) and appears in UI button
 labels (§8) — it must never be swapped for "Shuttle" in code paths that match list
 names.
+
+**One place to change that data.** The literal lives in exactly one file —
+`src/gm.js`, in `CONFIG_DEFAULTS` — and a test asserts that no other `src/` or
+`tools/` file restates it. Everything downstream reads it as a value:
+`ui.js` builds button labels from the loaded config, `reconcile.js` classifies from
+`config.stagingName`, and the §12 probe no longer needs to know it at all. So
+retargeting the tool at a differently-named staging list is either a settings
+change (preferred) or, to change the shipped default, a single edit in `gm.js`.
+§9's table is the documented source of the default; the tests read it from there
+instead of repeating it.
 
 ### 16.2 Metadata block
 

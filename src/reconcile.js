@@ -72,13 +72,18 @@
  */
 
 /**
- * Classify Part Lists into staging / boxes / ignored (D5, D6, D7).
+ * Split Part Lists into staging / boxes / ignored (§4.3, D5/D6/D7).
  *
- * Staging is matched by EXACT equality with `config.stagingName` — the default
- * value `Used for MOCs` is data, never a hardcoded literal here (spec §16.1).
+ * FAIL-CLOSED (D6): a list is a box only when its name matches `boxNamePattern`
+ * (the §9 config string, compiled with the `i` flag) AND it is neither the
+ * staging list nor on `ignoreLists`. Pending orders, wishlists and half-sorted
+ * bags must never be able to satisfy a consume plan. Never by build-type flag.
+ *
+ * `config.stagingName` is the single source of the staging name: it comes from
+ * `gm.CONFIG_DEFAULTS` (§16.1) and is never restated here or in the UI.
  *
  * @param {RbList[]} lists
- * @param {{stagingName: string, ignoreLists: string[]}} config
+ * @param {import('./gm.js').ShuttleConfig} config
  * @returns {Classification}
  */
 export function classifyLists(lists, config) {

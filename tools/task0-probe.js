@@ -30,7 +30,8 @@
   const DEFAULTS = {
     /** §12: never Task 0 against real boxes, so the list NAME must look scratch. */
     scratchPattern: /^(task\s*0|scratch|probe|test)/i,
-    stagingName: 'Used for MOCs',
+    /** D6 as the product will implement it: only names matching this count as boxes. */
+    boxNamePattern: /\bbox(?:es)?\b/i,
     delayMs: 400,
     backoffs: [1000, 2000, 4000],
     bigRows: 300,
@@ -193,7 +194,8 @@
     if (!cfg.scratchPattern.test(listName)) {
       throw new Error(`"${listName}" does not look like a scratch list — rename it to "Task0 …" (§12)`);
     }
-    if (norm(listName) === norm(cfg.stagingName)) throw new Error('refusing: that is the staging list');
+    // no separate staging check: the scratch-pattern gate above already rejects any
+    // name the staging list could have, and the probe hardcodes no staging name (§16.1).
     if (window.__task0Ran === listId) throw new Error('this list was already probed this page load — reload first');
 
     const gate = window.prompt(
@@ -314,6 +316,7 @@
 
       /* ---- 0.3 large-import shape, sourced read-only from a real box ---- */
       const boxLinks = new Map();
+      const outOfScope = [];
       if (cfg.boxListIds?.length) {
         for (const id of cfg.boxListIds) {
           if (String(id) !== listId) boxLinks.set(String(id), `#${id}`);
@@ -324,16 +327,17 @@
             /^\/users\/[^/]+\/partlists\/(\d+)\/?$/,
           );
           if (match && match[1] !== listId) {
-            boxLinks.set(match[1], anchor.textContent.replace(/\s+/g, ' ').trim());
+            const name = anchor.textContent.replace(/\s+/g, ' ').trim();
+            // D6 fail-closed: a list this probe cannot recognise as a box is not a
+            // source, even though reading it would be harmless.
+            if (cfg.boxNamePattern.test(name)) boxLinks.set(match[1], name);
+            else outOfScope.push(name);
           }
         }
       }
 
       let largest = [];
       for (const [id, name] of boxLinks) {
-        // names come from the sidebar only; an explicit boxListIds entry is already
-        // the user's assertion that it is a box, so don't name-filter those.
-        if (boxLinks.size > 1 && norm(name) === norm(cfg.stagingName)) continue;
         const rows = await (
           await request(`/users/${user}/partlists/${id}/parts/?format=rbpartscsv&inc_spares=0`)
         )
@@ -343,8 +347,15 @@
         await sleep(cfg.delayMs);
       }
 
+      evidence.scope = { inScope: [...boxLinks.values()], outOfScope };
       if (largest.length < 20) {
-        record('0.3', 'SKIP', `no reachable box list has ≥20 rows (largest ${largest.length}) — add parts to a box and rerun`);
+        record(
+          '0.3',
+          'SKIP',
+          `no box list in scope has ≥20 rows (largest ${largest.length}); in scope: ${boxLinks.size}` +
+            (outOfScope.length ? `, out of scope by name: ${outOfScope.join(', ')}` : '') +
+            ' — if a real box is missing, its name does not match boxNamePattern (D6)',
+        );
       } else {
         const rows = largest.slice(0, cfg.bigRows).map(([part, color]) => [part, color, 1]);
         const before = (await readScratch()).length;
