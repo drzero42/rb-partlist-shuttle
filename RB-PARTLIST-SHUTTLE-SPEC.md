@@ -323,6 +323,39 @@ Each has a pass criterion; on fail, adopt the stated alternative.
 Use a scratch Part List / a duplicated Custom List for destructive checks; never
 Task-0 on the user's real boxes until 0.1–0.6 pass.
 
+### 12.1 Running it
+
+`tools/task0-probe.js` automates 0.1–0.6. Paste it into the DevTools console on
+the **Import page of a scratch Part List** (`/users/<u>/partlists/<id>/importparts/`)
+and call `__task0()` — or `__task0({ apiKey })` to add the 0.1 v3 check. It
+Appends, reads back, Subtracts, and prints a verdict table plus JSON evidence.
+
+- It refuses to write unless the list NAME matches `/^(task\s*0|scratch|probe|test)/i`,
+  refuses the staging name outright, and requires a typed `TASK0` gate — the §12
+  "never against real boxes" rule enforced in code, not just in prose.
+- Box lists are touched **read-only** (for 0.3's row source and 0.5's comparison);
+  the only list written to is the scratch list, and every accepted Append is
+  subtracted again, with a net-zero row-count check after cleanup.
+- Sequential + 429-backoff (§7.6), 400ms pacing; `fix_molds` is never sent and the
+  probe asserts that on its own form (§5.2, D9).
+- Not bundled, not shipped, no manager APIs. Behaviour is pinned by
+  `test/task0-probe.test.js` against a fake server — including the case where the
+  server normalizes `48729b` anyway, which MUST surface as 0.2 FAIL.
+
+### 12.2 Results
+
+Record the probe output here before §6 shipping logic is written; no shipping
+logic may land while a row is `pending`.
+
+| item | verdict | outcome / adopted alternative | date |
+|------|---------|-------------------------------|------|
+| 0.1 | pending | | |
+| 0.2 | pending | | |
+| 0.3 | pending | | |
+| 0.4 | pending | | |
+| 0.5 | pending | | |
+| 0.6 | pending | | |
+
 ---
 
 ## 13. Fallback write path (only if internal import breaks)

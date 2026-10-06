@@ -12,7 +12,8 @@ spec wins — update this file to match, never the other way.
 
 - **Task 0 first.** Spec §12 (0.1–0.6) are implementer-verification items to
   run on a scratch Part List BEFORE writing shipping logic. Never Task 0
-  against the user's real boxes.
+  against the user's real boxes. Run them with `tools/task0-probe.js` (console
+  paste on a scratch list's Import page) and record the verdicts in spec §12.2.
 - **`fix_molds` is OMITTED from every write** (D9). No part-number rewriting,
   ever.
 - **All-or-nothing** (D11): any shortfall → zero writes + offender report. No
@@ -51,6 +52,7 @@ src/
 scripts/build.mjs esbuild → dist/rb-partlist-shuttle.user.js
                   (renders the §16.2 metadata banner; @version from package.json)
 scripts/release.mjs checks + build + tag/push; `--check` is the CI gate (§16.4)
+tools/task0-probe.js console probe for §12 (writes to one scratch list only)
 test/             Vitest + fixture CSVs under test/fixtures/
                   (vitest.config.js: fileParallelism off — release.test.js rebuilds dist/)
 .github/workflows/release.yml  on tag v*: test, build, verify, publish the asset
@@ -116,7 +118,12 @@ modules as contract-documented stubs (every function throws `NotImplemented:`),
 `scripts/build.mjs` + `scripts/release.mjs`, `.github/workflows/release.yml`, and
 Vitest suites that pin the §16.2 metadata block, the §5.2/§9 constants, the
 module import rules above, the fixture CSV shapes, and the release pipeline.
-`pnpm run build` produces an installable artifact.
+`pnpm run build` produces an installable artifact, and the release workflow is
+verified green on a real runner via `workflow_dispatch`.
+
+**Task 0 is not done**: the probe exists and is tested against a fake server, but
+0.1–0.6 can only be settled in the user's logged-in browser. §12.2 is all
+`pending`, so §6 logic must not be implemented yet.
 
 Next up per spec:
 1. Task 0 verification (spec §12) against a scratch Part List; record results
