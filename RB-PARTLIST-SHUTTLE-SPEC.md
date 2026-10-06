@@ -7,9 +7,11 @@ user's storage-box Part Lists and a single staging Part List named
 `Used for MOCs`** — in both directions — with no manual export/import steps and
 no state stored outside Rebrickable.
 
-Status: planning complete. This document is the build-ready spec for a fresh
-session. Section 12 ("Task 0") lists the few remaining **implementer-verification**
-items (low risk); none are open user-decisions.
+Status: spec complete, scaffold built. `package.json`, the `src/` module stubs
+(with their contracts written out), `scripts/build.mjs`, `scripts/release.mjs`
+and the Vitest suite all exist and are green. What remains is Section 12
+("Task 0") **implementer-verification** against a scratch Part List, then the §6
+logic in `csv.js`/`reconcile.js`. None of Task 0 is an open user-decision.
 
 ---
 
@@ -387,23 +389,29 @@ the default value of the `stagingName` config key (D5/§9) and appears in UI but
 labels (§8) — it must never be swapped for "Shuttle" in code paths that match list
 names.
 
-### 16.2 Metadata block skeleton
+### 16.2 Metadata block
 
-Starting point for Task 0; adjust `@grant` to what the implementation actually uses.
+`scripts/build.mjs` renders this block and prepends it to the bundle, so it is
+always the first thing in the file (Violentmonkey requires the metadata at the
+very beginning). `@version`, `@description` and `@author` come from
+`package.json` — the artifact can never disagree with the release tag.
 
 ```
 // ==UserScript==
-// @name         Rebrickable Part List Shuttle
-// @namespace    https://github.com/<your-handle>/rb-partlist-shuttle
-// @version      0.1.0
-// @description  Move exact part quantities between your Rebrickable box Part Lists and a staging Part List, in both directions, from a Custom List page.
-// @author       <you>
-// @match        https://rebrickable.com/users/*
-// @run-at       document-idle
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_addStyle
-// @grant        GM_download
+// @name        Rebrickable Part List Shuttle
+// @namespace   https://github.com/drzero42/rb-partlist-shuttle
+// @version     0.1.0
+// @description Move exact part quantities between your Rebrickable box Part Lists and a staging Part List, in both directions, from a Custom List page.
+// @author      Anders Bøgh Bruun
+// @match       https://rebrickable.com/users/*
+// @run-at      document-idle
+// @grant       GM_getValue
+// @grant       GM_setValue
+// @grant       GM_addStyle
+// @grant       GM_download
+// @downloadURL https://github.com/drzero42/rb-partlist-shuttle/releases/latest/download/rb-partlist-shuttle.user.js
+// @homepageURL https://github.com/drzero42/rb-partlist-shuttle
+// @supportURL  https://github.com/drzero42/rb-partlist-shuttle/issues
 // ==/UserScript==
 ```
 
@@ -414,6 +422,15 @@ Notes:
 - All reads/writes are **same-origin** to rebrickable.com with
   `credentials: 'include'` (§4, §5) → plain `fetch`, no `GM_xmlhttpRequest`, no
   `@connect`. Revisit only if §13's fallback path is ever activated.
+- **`@grant` is pinned, not hand-maintained.** AGENTS.md confines `GM_*` to
+  `gm.js`, and a test asserts that the `GM_*` identifiers referenced there equal
+  this list exactly — so neither a missing grant nor an over-grant can slip in.
+  This is what "adjust `@grant` to what the implementation actually uses" means
+  in practice: change `gm.js`, and the block follows.
+- **`@version` and `@downloadURL` are jointly required for auto-update.**
+  Violentmonkey compares the installed `@version` with the one served at
+  `@downloadURL`; a script with no `@version` never updates. Violentmonkey has no
+  separate `@updateURL` key (that spelling is Tampermonkey's).
 - `GM_download` is required by §7.3 (auto-backup). If a target manager lacks it,
   fall back to a blob + programmatic anchor click and drop the grant.
 - `GM_getValue`/`GM_setValue` back the §9 config keys. No password is ever
@@ -424,4 +441,26 @@ Notes:
 §11's module names are unchanged and stand on their own — no `shuttle` prefix
 needed inside the repo: `reconcile.js`, `rb-read.js`, `rb-write.js`,
 `rb-category.js`, `ui.js`, `safety.js`.
+
+### 16.4 Distribution
+
+The artifact ships as a **GitHub Release asset**; `dist/` stays gitignored.
+
+| concern | decision |
+|---------|----------|
+| Install / update URL | `…/releases/latest/download/rb-partlist-shuttle.user.js` |
+| Why `latest/download` | always resolves to the newest release, so `@downloadURL` needs no edit per version |
+| Asset filename | MUST end in `.user.js`, or Violentmonkey saves it as a file instead of offering to install |
+| Publish | `pnpm run release` (dry run: checks, then prints the commands) · `pnpm run release --yes` (tag `v<version>`, push tag, `gh release create` with the artifact) |
+| Rollback | install the version-pinned asset URL from an older tag |
+| Minification | `minify: false`, permanently: the bundle is what a human pastes into Violentmonkey, and Greasy Fork rejects minified/obfuscated code |
+
+`pnpm run release` refuses to publish when the working tree is dirty, when
+`v<version>` already exists on origin, or when the built artifact's `@version`
+does not match `package.json` — the checks run before anything is created.
+
+A Greasy Fork listing stays possible later with no code change (the unminified
+bundle satisfies their readability rule); it would then become the canonical
+`@downloadURL`, replacing the release URL.
+
 

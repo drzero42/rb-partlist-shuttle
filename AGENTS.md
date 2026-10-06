@@ -49,7 +49,8 @@ src/
   gm.js           the ONLY module allowed to touch GM_* APIs
   styles.css      inlined by bundler, injected via GM_addStyle
 scripts/build.mjs esbuild → dist/rb-partlist-shuttle.user.js
-                  (metadata banner injected from package.json version)
+                  (renders the §16.2 metadata banner; @version from package.json)
+scripts/release.mjs build + tag + `gh release create` with the artifact (§16.4)
 test/             Vitest + fixture CSVs under test/fixtures/
 ```
 
@@ -63,9 +64,11 @@ Module import rules (enforce, don't negotiate):
 - All network is same-origin `fetch` with `credentials: 'include'` — no
   `GM_xmlhttpRequest`, no `@connect` (spec §16.2).
 
-Build artifact: `dist/rb-partlist-shuttle.user.js`, self-contained, installed
-by pasting into Violentmonkey. Metadata block lives in `scripts/build.mjs`
-(`@version` mirrors `package.json`).
+Build artifact: `dist/rb-partlist-shuttle.user.js`, self-contained, unminified.
+`dist/` is gitignored — the artifact ships as a **GitHub Release asset**, and
+`@downloadURL` points at `releases/latest/download/<asset>` so Violentmonkey
+auto-updates on every tag (spec §16.4). Metadata block lives in
+`scripts/build.mjs` (`@version` mirrors `package.json`).
 
 ## Toolchain & commands
 
@@ -78,7 +81,12 @@ pnpm install        # inside `devenv shell`
 pnpm test           # vitest run — must stay green; pure logic lives here
 pnpm run dev        # esbuild watch → dist/
 pnpm run build      # release artifact → dist/rb-partlist-shuttle.user.js
+pnpm run release    # dry run: checks + prints the publish commands
+pnpm run release -- --yes   # tag v<version>, push tag, gh release create
 ```
+
+`pnpm.onlyBuiltDependencies` moved out of package.json in pnpm 12 — the esbuild
+build-script approval lives in `pnpm-workspace.yaml` (`allowBuilds`).
 
 Only deps: `esbuild`, `vitest`. Keep it that way — no framework, no runtime
 dependencies (they'd all be inlined into the userscript).
@@ -95,9 +103,19 @@ dependencies (they'd all be inlined into the userscript).
 
 ## Current status
 
-Pre-implementation. Next up per spec:
-1. Scaffold (`devenv.nix`, `package.json`, `src/` stubs, `scripts/build.mjs`, Vitest).
-2. Task 0 verification (spec §12) against a scratch Part List; record results
+Scaffold done and green: `package.json`, `pnpm-workspace.yaml`, all `src/`
+modules as contract-documented stubs (every function throws `NotImplemented:`),
+`scripts/build.mjs` + `scripts/release.mjs`, and Vitest suites that pin the
+§16.2 metadata block, the §5.2/§9 constants, the module import rules above, and
+the fixture CSV shapes. `pnpm run build` produces an installable artifact.
+
+Next up per spec:
+1. Task 0 verification (spec §12) against a scratch Part List; record results
    in the spec before shipping logic.
-3. `csv.js` + `reconcile.js` with tests (fixture CSVs), then I/O layers,
-   then UI.
+2. `csv.js` + `reconcile.js` with tests (fixture CSVs already in
+   `test/fixtures/`), then I/O layers, then UI — replacing the stubs module by
+   module and loosening the export-surface test as each contract settles.
+
+Note: the stub contracts for `rb-category.js`, `safety.js` and `ui.js` were
+written before Task 0 ran, so treat their exact signatures as provisional until
+0.1–0.6 confirm the response shapes they assume.
