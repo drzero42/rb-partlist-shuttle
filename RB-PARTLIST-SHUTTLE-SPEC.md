@@ -131,8 +131,9 @@ pass criterion.** HTTP 200, 2/2 parts back, and each item carries `part_num` +
 - Public catalog endpoint → needs the **API key** (free), NOT a user token, NOT the
   password. Still ~1 req/sec; batch via `part_nums`, page with `page_size` up to
   1000.
-- **Consequence:** the return direction now requires an API key, and §9's
-  `categoryMode: dom` option is not implementable. Open decision — see §12.3.
+- **Consequence:** `categoryMode: dom` is not implementable, and per the user's
+  decision (2026-10-06) the return direction must **not** require an API key — so
+  category-based routing is the wrong mechanism entirely. See §12.3 item 6.
 
 ---
 
@@ -428,7 +429,7 @@ net-zero check passed (`4 baseline rows, 0 un-undone`).
 
 | item | verdict | outcome / adopted alternative | date |
 |------|---------|-------------------------------|------|
-| 0.1 | **FAIL** | `part_cat_id` is returned, **`part_cat_name` is not**, and the DOM fallback is dead (0 `data-part_cat_*` on the list page and in the import `html`). Adopted: route on id + one cached `/lego/part_categories/` call for names (§4.4). Return direction now needs the key — `categoryMode: dom` decision open (§12.3) | 2026-10-06 |
+| 0.1 | **FAIL** | `part_cat_id` is returned, **`part_cat_name` is not**, and the DOM fallback is dead (0 `data-part_cat_*` on the list page and in the import `html`). Follow-up read-only call: items DO carry `name` (`4592` "Lever Small Base", `4593` "Lever Small") and `/lego/part_categories/` maps id→name (`11` Bricks, `32` Bars, Ladders and Fences) — names are reachable, but only with a key. Superseded by §12.3 item 6 | 2026-10-06 |
 | 0.2 | **PASS** | omitting `fix_molds` keeps ids literal (`48729b,0` → `48729b,0`, nothing rewritten); the response `html` also echoes `Using settings: Fix Molds = False`, which the tool now asserts per write | 2026-10-06 |
 | 0.3 | **PASS + warning** | 300 rows stayed **one synchronous POST** each way (10.6s / 14.2s, no confirm/progress keys) → atomicity model holds. But the response warned `some parts were CHANGED during import: Merging 1 x part 4592 in color 1, 1 x part 4593 in color 0` **while Fix Molds = False** → §7.5 id-level verification is now mandatory | 2026-10-06 |
 | 0.4 | **PASS** | token read from the Part-List page served 4 appends + 3 subtracts with no re-read; the `csrftoken` cookie is HttpOnly (unreadable from JS), so the DOM is the only possible source (§5.2) | 2026-10-06 |
@@ -453,10 +454,32 @@ net-zero check passed (`4 baseline rows, 0 un-undone`).
    promise weakest — recommended.
 4. **Budget for slow writes (§8).** ~10-14s per 300-row import means the progress log
    must show which box is in flight; nothing about the plan changes.
-5. **Unknown: which part pairs merge.** `4592`/`4593` came from the user's own box
-   data. Until that is understood, a `missing` verdict in §6.1 may mean "stored under
-   a merged id", so the offender report must show the neighbouring ids in the box
-   (same 5-digit prefix) rather than claiming the part is absent.
+5. **Unknown: which part pairs merge — and the run's merge is not traceable to the
+   rows I appended.** `4592`/`4593` are two *different* parts (Lever Small Base /
+   Lever Small, both cat 32), so folding them onto one line is a real inventory
+   change, not a colour alias. The first 300 rows of #717494 (`Big storage boxes`)
+   contain **neither id** — and the probe never recorded which box list it actually
+   borrowed from, so the trigger is still unidentified. Two fixes: 0.3 now records
+   `sourceList`, and a new **0.3b** appends exactly those two rows to the scratch
+   list in isolation (~1s, undone immediately) to see whether the pair alone
+   reproduces the warning and which line survives. Until 0.3b has an answer, §6.1's
+   `missing` verdict must not claim a part is absent without listing the same-prefix
+   ids the box does hold.
+
+6. **Return must work without an API key (user decision, 2026-10-06), which kills
+   category routing as the mechanism.** §4.4's inputs are unavailable keylessly, and
+   the backend rewrites ids regardless. Proposed replacement for §6.2 — route on the
+   **box contents** the tool already reads, in this order:
+   1. exact `(Part,Color)` in a box → that box;
+   2. same `Part`, any colour, in exactly one box → that box (this absorbs rewrites
+      like `4592,1` → `4593,0`);
+   3. same 5-digit design id with a different mold letter (`48729b` ⇄ `48729a`) in
+      exactly one box → that box, reported as a mold-family match;
+   4. otherwise the §6.3 prompt, now the normal fallback rather than the exception.
+   Ties across boxes still prompt. This deletes `categoryMode` and `apiKey` from §9,
+   removes the last credential-ish surface from §10, and makes §4.4 unnecessary — at
+   the cost of D8's storage-invariant framing, which becomes an optimisation instead
+   of the mechanism. **Awaiting approval before §6.2/§9/§10/§4.4 are rewritten.**
 
 ---
 

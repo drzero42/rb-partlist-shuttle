@@ -139,16 +139,19 @@ Confirmed by measurement, so the stubs are no longer guesses:
 - `boxNamePattern` (`\bbox(?:es)?\b`) is validated against all 15 real lists.
 
 Needs rework before implementation:
-- `rb-category.js`: `part_cat_name` is not returned and there are no
-  `data-part_cat_*` attributes to scrape — route on `part_cat_id`, get names from
-  one cached `/lego/part_categories/` call, and settle the §12.3 `categoryMode`
-  decision (drop the return direction, or make the API key required).
+- `rb-category.js` is probably **deleted**: the user decided Return must not need an
+  API key, and category data is only reachable with one (§12.3 item 6). Proposed
+  replacement for §6.2 routing is box-contents based (exact → same part any colour →
+  mold-family prefix → prompt), which would also drop `categoryMode`/`apiKey` from §9.
+  Awaiting approval; do not implement either mechanism until that lands.
 - `safety.js`: §7.5 verification is now id-level and mandatory.
+- open: reproduce the 4592/4593 merge (probe 0.3b) and record which box list 0.3
+  borrowed from, before writing §6.1's `missing` verdict.
 
 Next up per spec:
 1. Settle the §12.3 open decision (recommendation there).
 2. `csv.js` + `reconcile.js` with tests (fixture CSVs already in
    `test/fixtures/`), then I/O layers, then UI — replacing the stubs module by
    module and loosening the export-surface test as each contract settles.
-3. The 4592/4593 merge seen in 0.3 is still unexplained — until it is, §6.1's
-   `missing` verdict must not claim a part is absent without showing near-miss ids.
+3. Run the probe's new 0.3b to reproduce the 4592/4593 merge; until it is explained,
+   §6.1's `missing` verdict must not claim absence without showing same-prefix ids.

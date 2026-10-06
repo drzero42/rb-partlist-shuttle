@@ -33,6 +33,7 @@ function server({
   listStatus = 200,
   importFormPath = `/users/abo/partlists/${SCRATCH}/import/`,
   endpointStatus = 200,
+  mergePair = false,
   rewriteOnSubtract = false,
   headings = true,
   chrome = false,
@@ -119,9 +120,16 @@ function server({
       if (endpointStatus !== 200) return reply(endpointStatus, errorPage);
       if (token !== CSRF) return reply(403, errorPage);
 
+      // mergePair mimics §12's observation: RB folded two DISTINCT parts
+      // (4592 "Lever Small Base", 4593 "Lever Small") onto one line while
+      // reporting Fix Molds = False.
+      const mergeKey = (part, color) =>
+        mergePair && ((part === '4592' && color === '1') || (part === '4593' && color === '0'))
+          ? '4593,0'
+          : `${normalize(part)},${color}`;
       for (const row of rows) {
         const [part, color, qty] = row.split(',');
-        const key = `${normalize(part)},${color}`;
+        const key = mergeKey(part, color);
         const have = state.get(key) || 0;
         if (action === 'S' && have < Number(qty)) {
           return reply(200, JSON.stringify({ status: 'error', html: `Not enough ${key}`, renders: {} }));
@@ -139,7 +147,7 @@ function server({
           status: 'success',
           html:
             '<table><tr data-part_cat_id="12">ok</tr><b>Warnings x1 (some parts were CHANGED during import):</b>' +
-            ' Merging 1 x part 4592 in color 1, 1 x part 4593 in color 0 END-OF-WARNINGS</table>',
+            ` Merging 1 x part ${mergePair ? '4592 in color 1, 1 x part 4593 in color 0' : '99999 in color 1, 1 x part 99998 in color 0'} END-OF-WARNINGS</table>`,
           renders: { '#user_parts_list': listPage(), '#parts_count': state.size },
         }),
       );
@@ -249,6 +257,30 @@ describe('task0 probe', () => {
     expect(net.verdict).toBe('CHECK');
     expect(net.summary).toMatch(/left behind 48729a,0/);
     expect(evidence.net.added).toEqual(['48729a,0']);
+  });
+
+  it('0.3b passes when the merged pair is not reported against our own ids', async () => {
+    const { results, evidence } = await boot(server()).promise;
+    expect(verdicts(results)['0.3b']).toBe('PASS');
+    expect(evidence['0.3b'].appended).toEqual([['4592', '1', 1], ['4593', '0', 1]]);
+    expect(evidence['0.3b'].appeared.map((row) => row.join(','))).toEqual(['4592,1,1', '4593,0,1']);
+  });
+
+  it('0.3b catches the backend folding two distinct parts onto one line', async () => {
+    const { results, evidence } = await boot(server({ mergePair: true })).promise;
+    const check = results.find((result) => result.id === '0.3b');
+    expect(check.verdict).toBe('CHECK');
+    expect(check.summary).toMatch(/4593,0/);
+    expect(check.summary).toMatch(/server named our ids in its warning=4592,4593/);
+    expect(evidence['0.3b'].appeared).toEqual([['4593', '0', '2']]);
+    expect(verdicts(results).net).toBe('PASS');
+  });
+
+  it('records which box list 0.3 borrowed its rows from', async () => {
+    const { evidence } = await boot(server()).promise;
+    expect(evidence.sourceList.listId).toBe(BOX2);
+    expect(evidence.sourceList.name).toBe('Technic box');
+    expect(evidence.sourceList.totalRows).toBe(30);
   });
 
   it('reports PASS across the probed items for a server that behaves', async () => {

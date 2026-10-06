@@ -49,6 +49,8 @@
     /** D9/D10 pair: a mold-suffixed id and a plain one. */
     mold: ['48729b', '0', 2],
     plain: ['3005', '0', 2],
+    /** 0.3b: the exact pair §12 saw merged with `Fix Molds = False`. */
+    mergeRows: [['4592', '1', 1], ['4593', '0', 1]],
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -453,13 +455,15 @@
       }
 
       let largest = [];
+      let largestId = null;
+      let largestName = null;
       for (const [id, name] of boxLinks) {
         const rows = await (
           await request(`/users/${user}/partlists/${id}/parts/?format=rbpartscsv&inc_spares=0`)
         )
           .text()
           .then(parseCsv);
-        if (rows.length > largest.length) largest = rows;
+        if (rows.length > largest.length) [largest, largestId, largestName] = [rows, id, name];
         await sleep(cfg.delayMs);
       }
 
@@ -474,6 +478,7 @@
         );
       } else {
         const rows = largest.slice(0, cfg.bigRows).map(([part, color]) => [part, color, 1]);
+        evidence.sourceList = { listId: largestId, name: largestName, totalRows: largest.length };
         const before = (await readScratch()).length;
         const bigAppend = await append(rows, csrf, '0.3-large');
         const mid = (await readScratch()).length;
@@ -490,6 +495,29 @@
             `subtract ${bigSubtract.httpStatus}/${bigSubtract.status} in ${bigSubtract.ms}ms; ` +
             `csv lines ${before}→${mid}→${afterBig}; response keys ${JSON.stringify(bigAppend.keys)}; multi-step markers=${multiStep}`,
           { rows: rows.length, append: bigAppend, subtract: bigSubtract, lines: { before, mid, after: afterBig } },
+        );
+      }
+
+      /* ---- 0.3b reproduce the merge with the two rows alone ---- */
+      {
+        const before = await readScratch();
+        const merged = await append(cfg.mergeRows, csrf, '0.3b-append');
+        const after = await readScratch();
+        const subtract = await importParts('S', cfg.mergeRows, csrf, '0.3b-subtract');
+        if (subtract.ok) markUndone('0.3b-append');
+        const settled = await readScratch();
+        const added = after.filter((row) => !before.some((other) => keyOf(other) === keyOf(row)));
+        const wanted = cfg.mergeRows.map(keyOf).sort();
+        const got = added.map(keyOf).sort();
+        const named = cfg.mergeRows.map(([part]) => part).filter((part) => (merged.warnings || '').includes(part));
+        record(
+          '0.3b',
+          JSON.stringify(got) === JSON.stringify(wanted) && !named.length ? 'PASS' : 'CHECK',
+          `appended ${wanted.join(' + ')} in isolation → ${got.join(' + ') || 'nothing'}; ` +
+            `server named our ids in its warning=${named.join(',') || 'no'}; ` +
+            `subtract ${subtract.httpStatus}/${subtract.status}; round-trip restored=${JSON.stringify(settled.map(keyOf).sort()) === JSON.stringify(before.map(keyOf).sort())}` +
+            (merged.warnings ? ` | warning: ${merged.warnings.slice(0, 200)}` : ''),
+          { appended: cfg.mergeRows, appeared: added, warnings: merged.warnings, subtract: { status: subtract.status, warnings: subtract.warnings }, settled: settled.map(keyOf) },
         );
       }
 
