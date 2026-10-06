@@ -13,7 +13,9 @@ spec wins — update this file to match, never the other way.
 - **Task 0 first.** Spec §12 (0.1–0.6) are implementer-verification items to
   run on a scratch Part List BEFORE writing shipping logic. Never Task 0
   against the user's real boxes. Run them with `tools/task0-probe.js` (console
-  paste on a scratch list's Import page) and record the verdicts in spec §12.2.
+  paste on a scratch list's Import page, scoped with
+  `__task0({ boxListIds: ['<box id>'] })`) and record the verdicts in spec §12.2.
+  0.5 is settled by declaration (the account has no spare parts), not probed.
 - **`fix_molds` is OMITTED from every write** (D9). No part-number rewriting,
   ever.
 - **All-or-nothing** (D11): any shortfall → zero writes + offender report. No

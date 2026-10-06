@@ -19,6 +19,7 @@ const CSRF = 'dom-token-abcdef';
 const COOKIE = 'cookie-token-9999';
 const SCRATCH = '123';
 const BOX = '777';
+const BOX2 = '888';
 const BASELINE = [
   ['3001,1', 4],
   ['3005,0', 1],
@@ -28,7 +29,12 @@ const BASELINE = [
 function server({ normalize = (part) => part, listName = 'Task0 probe', spares = true } = {}) {
   const calls = [];
   const state = new Map(BASELINE);
-  const boxRows = Array.from({ length: 25 }, (_, index) => [`900${index}`, '0', '3']);
+  // BOX2 is deliberately larger, so the sidebar walk picks it for 0.3 and a
+  // scoped run can be told apart from a walk.
+  const boxes = {
+    [BOX]: Array.from({ length: 25 }, (_, index) => [`900${index}`, '0', '3']),
+    [BOX2]: Array.from({ length: 30 }, (_, index) => [`800${index}`, '0', '3']),
+  };
   const boxSpares = [['6558', '0', '2'], ['3005', '1', '1']];
 
   const toCsv = (rows) => ['Part,Color,Quantity', ...rows.map((row) => row.join(','))].join('\r\n') + '\r\n';
@@ -53,8 +59,8 @@ function server({ normalize = (part) => part, listName = 'Task0 probe', spares =
     if (init.method !== 'POST' && pathname === `/users/abo/partlists/${SCRATCH}/`) return reply(200, listPage());
 
     const parts = pathname.match(/^\/users\/abo\/partlists\/(\d+)\/parts\/$/);
-    if (parts && parts[1] === BOX) {
-      const rows = searchParams.get('inc_spares') === '1' && spares ? [...boxRows, ...boxSpares] : boxRows;
+    if (parts && boxes[parts[1]]) {
+      const rows = searchParams.get('inc_spares') === '1' && spares ? [...boxes[parts[1]], ...boxSpares] : boxes[parts[1]];
       return reply(200, toCsv(rows));
     }
     if (parts && parts[1] === SCRATCH) return reply(200, scratchCsv());
@@ -129,6 +135,7 @@ function boot(fixtures, options = {}, gate = () => 'TASK0') {
       querySelectorAll: () => [
         { getAttribute: () => `/users/abo/partlists/${SCRATCH}/`, textContent: 'Task0 probe' },
         { getAttribute: () => `https://rebrickable.com/users/abo/partlists/${BOX}/`, textContent: ' Bricks box ' },
+        { getAttribute: () => `/users/abo/partlists/${BOX2}/`, textContent: ' Technic box ' },
         { getAttribute: () => '/users/abo/lists/999/', textContent: 'A Custom List' },
       ],
     },
@@ -193,16 +200,36 @@ describe('task0 probe', () => {
     expect(fixtures.calls.filter((call) => call.action === 'S').length).toBeGreaterThan(0);
   });
 
-  it('reports PASS across 0.2–0.6 for a server that behaves', async () => {
+  it('reports PASS across the probed items for a server that behaves', async () => {
     const fixtures = server();
     const { results } = await boot(fixtures).promise;
     const seen = verdicts(results);
     expect(seen['0.2']).toBe('PASS');
     expect(seen['0.3']).toBe('PASS');
     expect(seen['0.4']).toBe('PASS');
-    expect(seen['0.5']).toBe('PASS');
     expect(seen['0.6']).toBe('PASS');
-    // only the deliberate cookie-token probe may use a non-DOM token
+    expect(seen['0.5']).toBe('DECLARED');
+    // the default walk reads every box link in the sidebar
+    expect(fixtures.calls.filter((call) => call.url.includes(`/partlists/${BOX2}/parts/`)).length).toBeGreaterThan(0);
+  });
+
+  it('boxListIds scopes the reads instead of walking the sidebar', async () => {
+    const fixtures = server();
+    const { results, evidence } = await boot(fixtures, { boxListIds: [BOX] }).promise;
+    expect(verdicts(results)['0.3']).toBe('PASS');
+    expect(evidence['0.3'].rows).toBe(25);
+    expect(fixtures.calls.filter((call) => call.url.includes(`/partlists/${BOX2}/`))).toHaveLength(0);
+  });
+
+  it('sparesCheck compares one box list on request', async () => {
+    const { results, evidence } = await boot(server(), { sparesCheck: true, boxListIds: [BOX] }).promise;
+    expect(verdicts(results)['0.5']).toBe('PASS');
+    expect(evidence['0.5'].extra).toEqual(['6558,0', '3005,1']);
+  });
+
+  it('uses a non-DOM token exactly once — the deliberate cookie probe', async () => {
+    const fixtures = server();
+    await boot(fixtures).promise;
     const foreign = fixtures.calls.filter((call) => call.token && call.token !== CSRF);
     expect(foreign).toHaveLength(1);
     expect(foreign[0].token).toBe(COOKIE);

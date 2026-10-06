@@ -314,8 +314,12 @@ Each has a pass criterion; on fail, adopt the stated alternative.
   is accepted by the import POST. If a fresh token is needed per request, re-read
   it (or reuse a cookie token where masked) before each write.
 - **0.5 `inc_spares` default** — Decide whether box reads include spare parts.
-  Test with and without `inc_spares=1`; pick default and document; likely keep OFF
-  so only true box contents are matched.
+  ~~Test with and without `inc_spares=1`~~ — **settled by declaration, not probed**:
+  this account tracks no spare parts, so the flag can only ever add rows that do
+  not exist, and reading all 15 Part Lists twice to prove that is pure cost.
+  Default stays **OFF**, so only true box contents are matched (§4.2). The probe
+  reports this as `DECLARED` and skips the double read; `{ sparesCheck: true }`
+  compares a single box list on demand.
 - **0.6 Part-id exactness** — Confirm `rbpartscsv` `Part` ids match box-id strings
   byte-for-byte for the same part+color. Confirm the staging Append stores literal
   ids (ties to 0.2).
@@ -327,15 +331,18 @@ Task-0 on the user's real boxes until 0.1–0.6 pass.
 
 `tools/task0-probe.js` automates 0.1–0.6. Paste it into the DevTools console on
 the **Import page of a scratch Part List** (`/users/<u>/partlists/<id>/importparts/`)
-and call `__task0()` — or `__task0({ apiKey })` to add the 0.1 v3 check. It
-Appends, reads back, Subtracts, and prints a verdict table plus JSON evidence.
+and call `__task0({ boxListIds: ['<one box id>'] })` — recommended: the account has
+15 Part Lists, and without a scope the probe walks every sidebar link (~30 reads)
+just to find a large list for 0.3. `__task0()` walks the sidebar; adding
+`apiKey` includes the 0.1 v3 check. It Appends, reads back, Subtracts, and prints
+a verdict table plus JSON evidence.
 
 - It refuses to write unless the list NAME matches `/^(task\s*0|scratch|probe|test)/i`,
   refuses the staging name outright, and requires a typed `TASK0` gate — the §12
   "never against real boxes" rule enforced in code, not just in prose.
-- Box lists are touched **read-only** (for 0.3's row source and 0.5's comparison);
-  the only list written to is the scratch list, and every accepted Append is
-  subtracted again, with a net-zero row-count check after cleanup.
+- Box lists are touched **read-only** (for 0.3's row source); the only list written
+  to is the scratch list, and every accepted Append is subtracted again, with a
+  net-zero row-count check after cleanup.
 - Sequential + 429-backoff (§7.6), 400ms pacing; `fix_molds` is never sent and the
   probe asserts that on its own form (§5.2, D9).
 - Not bundled, not shipped, no manager APIs. Behaviour is pinned by
@@ -353,7 +360,7 @@ logic may land while a row is `pending`.
 | 0.2 | pending | | |
 | 0.3 | pending | | |
 | 0.4 | pending | | |
-| 0.5 | pending | | |
+| 0.5 | declared | no spare parts in this account (user-declared) → `inc_spares` default **OFF**; not probed | 2026-10-06 |
 | 0.6 | pending | | |
 
 ---

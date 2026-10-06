@@ -12,8 +12,13 @@
  *   2. Open its Import page while logged in:
  *        https://rebrickable.com/users/<you>/partlists/<id>/importparts/
  *   3. DevTools → Console → paste this whole file. Then:
- *        __task0()                             // 0.2–0.6
- *        __task0({ apiKey: '<catalog key>' })  // also runs 0.1 via the v3 API
+ *        __task0({ boxListIds: ['<one box id>'] })  // recommended: with 15 Part
+ *                                                   // Lists, don't walk the sidebar
+ *        __task0()                                  // full sidebar walk
+ *        __task0({ apiKey: '<catalog key>' })       // also runs 0.1 via the v3 API
+ *
+ * 0.5 (inc_spares) is DECLARED, not probed: this account tracks no spare parts,
+ * so reading every box twice proves nothing — see §12 0.5.
  *   4. Type TASK0 at the gate, then paste the printed report back.
  *
  * Not bundled, not shipped: it lives in tools/, touches no userscript-manager
@@ -30,6 +35,10 @@
     backoffs: [1000, 2000, 4000],
     bigRows: 300,
     apiKey: '',
+    /** 0.3 reads these box lists only — with 15 Part Lists, walking the sidebar is ~30 wasted GETs. */
+    boxListIds: null,
+    /** §12 0.5: this account has no spare parts, so the double read proves nothing. Opt in to compare one list anyway. */
+    sparesCheck: false,
     /** D9/D10 pair: a mold-suffixed id and a plain one. */
     mold: ['48729b', '0', 2],
     plain: ['3005', '0', 2],
@@ -305,18 +314,26 @@
 
       /* ---- 0.3 large-import shape, sourced read-only from a real box ---- */
       const boxLinks = new Map();
-      for (const anchor of document.querySelectorAll('a[href]')) {
-        const match = new URL(anchor.getAttribute('href'), location.origin).pathname.match(
-          /^\/users\/[^/]+\/partlists\/(\d+)\/?$/,
-        );
-        if (match && match[1] !== listId) {
-          boxLinks.set(match[1], anchor.textContent.replace(/\s+/g, ' ').trim());
+      if (cfg.boxListIds?.length) {
+        for (const id of cfg.boxListIds) {
+          if (String(id) !== listId) boxLinks.set(String(id), `#${id}`);
+        }
+      } else {
+        for (const anchor of document.querySelectorAll('a[href]')) {
+          const match = new URL(anchor.getAttribute('href'), location.origin).pathname.match(
+            /^\/users\/[^/]+\/partlists\/(\d+)\/?$/,
+          );
+          if (match && match[1] !== listId) {
+            boxLinks.set(match[1], anchor.textContent.replace(/\s+/g, ' ').trim());
+          }
         }
       }
 
       let largest = [];
       for (const [id, name] of boxLinks) {
-        if (norm(name) === norm(cfg.stagingName)) continue;
+        // names come from the sidebar only; an explicit boxListIds entry is already
+        // the user's assertion that it is a box, so don't name-filter those.
+        if (boxLinks.size > 1 && norm(name) === norm(cfg.stagingName)) continue;
         const rows = await (
           await request(`/users/${user}/partlists/${id}/parts/?format=rbpartscsv&inc_spares=0`)
         )
@@ -349,41 +366,35 @@
         );
       }
 
-      /* ---- 0.5 inc_spares default (read-only) ---- */
-      let withExtra = null;
-      let firstSeen = null;
-      for (const [id] of boxLinks) {
-        const read = async (inc) => {
-          const rows = await (
-            await request(`/users/${user}/partlists/${id}/parts/?format=rbpartscsv&inc_spares=${inc}`)
-          )
-            .text()
-            .then(parseCsv);
-          return rows;
-        };
-        const off = await read(0);
-        const on = await read(1);
-        await sleep(cfg.delayMs);
-        const extra = on.filter((row) => !off.some((other) => keyOf(other) === keyOf(row)));
-        if (!firstSeen) firstSeen = { listId: id, off: off.length, on: on.length, extra: [] };
-        if (extra.length) {
-          withExtra = { listId: id, off: off.length, on: on.length, extra: extra.slice(0, 5).map(keyOf) };
-          break;
+      /* ---- 0.5 inc_spares: declared, not probed, unless sparesCheck ---- */
+      if (!cfg.sparesCheck) {
+        record(
+          '0.5',
+          'DECLARED',
+          'not probed — this account has no spare parts, so inc_spares=1 can only add rows that do not exist; ' +
+            'default stays OFF per §4.2 (true box contents only). Pass { sparesCheck: true } to compare one box list anyway.',
+        );
+      } else {
+        const [id] = boxLinks.keys();
+        if (!id) {
+          record('0.5', 'SKIP', 'no box list in scope to compare — pass { boxListIds: ["<id>"] } or use the sidebar walk');
+        } else {
+          const read = async (inc) =>
+            parseCsv(await (await request(`/users/${user}/partlists/${id}/parts/?format=rbpartscsv&inc_spares=${inc}`)).text());
+          const off = await read(0);
+          const on = await read(1);
+          const extra = on.filter((row) => !off.some((other) => keyOf(other) === keyOf(row)));
+          await sleep(cfg.delayMs);
+          record(
+            '0.5',
+            extra.length ? 'PASS' : 'CHECK',
+            extra.length
+              ? `inc_spares=1 adds ${extra.length} rows on list #${id} (${extra.slice(0, 5).map(keyOf).join(', ')}) → keep the default OFF`
+              : `list #${id}: ${off.length} rows with and without the flag — consistent with no spares in this account`,
+            { listId: id, off: off.length, on: on.length, extra: extra.slice(0, 5).map(keyOf) },
+          );
         }
       }
-      const spares = withExtra || firstSeen;
-      record(
-        '0.5',
-        withExtra ? 'PASS' : spares ? 'CHECK' : 'SKIP',
-        withExtra
-          ? `inc_spares=1 exposes ${withExtra.extra.length}+ spare rows on list #${withExtra.listId} (${withExtra.extra.join(', ')}) ` +
-            `— ${withExtra.off}→${withExtra.on} rows, so keep the default OFF: §4.2 must match true box contents only`
-          : spares
-            ? `no spare rows found on list #${spares.listId} (${spares.off} vs ${spares.on} rows) — that box has no spares; ` +
-              'OFF stays the safe default, rerun with a box that has spares to prove the flag does something'
-            : 'no box lists in the sidebar to compare',
-        spares,
-      );
 
     } catch (error) {
       abort = error;
