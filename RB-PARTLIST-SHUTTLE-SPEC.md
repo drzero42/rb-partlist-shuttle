@@ -451,13 +451,21 @@ The artifact ships as a **GitHub Release asset**; `dist/` stays gitignored.
 | Install / update URL | `…/releases/latest/download/rb-partlist-shuttle.user.js` |
 | Why `latest/download` | always resolves to the newest release, so `@downloadURL` needs no edit per version |
 | Asset filename | MUST end in `.user.js`, or Violentmonkey saves it as a file instead of offering to install |
-| Publish | `pnpm run release` (dry run: checks, then prints the commands) · `pnpm run release --yes` (tag `v<version>`, push tag, `gh release create` with the artifact) |
+| Publisher | `.github/workflows/release.yml`, on `push: tags: ['v*']` — the **only** thing that creates a release |
+| Dev side | `pnpm run release` (dry run: checks, then prints the commands) · `pnpm run release -- --yes` (checks, tag `v<version>`, push the tag; the workflow publishes) |
+| CI gate | `node scripts/release.mjs --check [--expect-tag <ref>]` — build + verify, no git writes; the workflow runs it with `--expect-tag "$GITHUB_REF_NAME"` so a tag that disagrees with `package.json` cannot publish |
 | Rollback | install the version-pinned asset URL from an older tag |
 | Minification | `minify: false`, permanently: the bundle is what a human pastes into Violentmonkey, and Greasy Fork rejects minified/obfuscated code |
 
-`pnpm run release` refuses to publish when the working tree is dirty, when
-`v<version>` already exists on origin, or when the built artifact's `@version`
-does not match `package.json` — the checks run before anything is created.
+`release.mjs` refuses to tag when the working tree is dirty or when `v<version>`
+already exists on origin; the workflow refuses to publish when the tag does not
+match `package.json`, when the suite is red, or when the artifact does not start
+with the §16.2 banner and carry `@downloadURL`. Every check runs before anything
+is created. Re-running a tag re-uploads the asset (`gh release upload --clobber`)
+rather than failing on an existing release.
+
+`workflow_dispatch` runs the same chain minus the publish step, so CI can be
+exercised without cutting a release.
 
 A Greasy Fork listing stays possible later with no code change (the unminified
 bundle satisfies their readability rule); it would then become the canonical

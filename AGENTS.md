@@ -50,8 +50,10 @@ src/
   styles.css      inlined by bundler, injected via GM_addStyle
 scripts/build.mjs esbuild → dist/rb-partlist-shuttle.user.js
                   (renders the §16.2 metadata banner; @version from package.json)
-scripts/release.mjs build + tag + `gh release create` with the artifact (§16.4)
+scripts/release.mjs checks + build + tag/push; `--check` is the CI gate (§16.4)
 test/             Vitest + fixture CSVs under test/fixtures/
+                  (vitest.config.js: fileParallelism off — release.test.js rebuilds dist/)
+.github/workflows/release.yml  on tag v*: test, build, verify, publish the asset
 ```
 
 Module import rules (enforce, don't negotiate):
@@ -81,9 +83,15 @@ pnpm install        # inside `devenv shell`
 pnpm test           # vitest run — must stay green; pure logic lives here
 pnpm run dev        # esbuild watch → dist/
 pnpm run build      # release artifact → dist/rb-partlist-shuttle.user.js
-pnpm run release    # dry run: checks + prints the publish commands
-pnpm run release -- --yes   # tag v<version>, push tag, gh release create
+pnpm run release    # dry run: checks + prints the commands
+pnpm run release -- --yes   # checks, tag v<version>, push the tag
 ```
+
+Publishing is done by `.github/workflows/release.yml` on `push: tags: ['v*']` —
+it reinstalls, runs the suite, rebuilds, verifies the artifact against the tag,
+and creates the release with the asset. `release.mjs` never calls
+`gh release create`, so there is one publisher. `workflow_dispatch` runs the same
+chain without publishing (spec §16.4).
 
 `pnpm.onlyBuiltDependencies` moved out of package.json in pnpm 12 — the esbuild
 build-script approval lives in `pnpm-workspace.yaml` (`allowBuilds`).
@@ -105,9 +113,10 @@ dependencies (they'd all be inlined into the userscript).
 
 Scaffold done and green: `package.json`, `pnpm-workspace.yaml`, all `src/`
 modules as contract-documented stubs (every function throws `NotImplemented:`),
-`scripts/build.mjs` + `scripts/release.mjs`, and Vitest suites that pin the
-§16.2 metadata block, the §5.2/§9 constants, the module import rules above, and
-the fixture CSV shapes. `pnpm run build` produces an installable artifact.
+`scripts/build.mjs` + `scripts/release.mjs`, `.github/workflows/release.yml`, and
+Vitest suites that pin the §16.2 metadata block, the §5.2/§9 constants, the
+module import rules above, the fixture CSV shapes, and the release pipeline.
+`pnpm run build` produces an installable artifact.
 
 Next up per spec:
 1. Task 0 verification (spec §12) against a scratch Part List; record results
