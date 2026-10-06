@@ -364,9 +364,14 @@ renders its error pages as full site pages — with their own `csrfmiddlewaretok
 input — so a token scraped from a non-OK response looks perfectly valid. The probe
 therefore only accepts tokens from `response.ok` pages, trying the list page itself
 first, then its own `import` links, and records which URL supplied the token in the
-report (`target.csrfSource`) — the answer `rb-read.js`/`rb-write.js` need. If the
-page has no readable heading, pass `{ listName: 'Task0 …' }` to state it explicitly
-(§12's scratch guard still applies to it). The box lists it reads come from that scrape filtered
+report (`target.csrfSource`) — the answer `rb-read.js`/`rb-write.js` need. The scratch-list guard reads the list's own name from the
+**sidebar anchor for that exact list id** — `/users/<u>/partlists/<id>/` root links
+only, so sub-page links like `…/import/` (text "Import") never masquerade as a name.
+Headings and `<title>` are last-resort fallbacks and **cannot satisfy the guard on
+site chrome**: a real run's first `h1` was the site title, and refusing on it is
+correct. If nothing identifies the list, pass `{ listName: 'Task0 …' }` — the guard
+still applies to whatever name is used, and the report records where it came from
+(`target.nameSource`, `target.sidebarAnchors`). The box lists it reads come from that scrape filtered
 by `boxNamePattern` (D6), and the report's `scope` block names what it put in and
 out — which doubles as a check of the pattern against the account's real names.
 

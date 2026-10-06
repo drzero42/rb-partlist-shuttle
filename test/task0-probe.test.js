@@ -34,6 +34,8 @@ function server({
   importFormPath = `/users/abo/partlists/${SCRATCH}/import/`,
   endpointStatus = 200,
   headings = true,
+  chrome = false,
+  anchorThisList = true,
 } = {}) {
   const calls = [];
   const state = new Map(BASELINE);
@@ -49,7 +51,7 @@ function server({
   const scratchCsv = () => toCsv([...state].map(([key, qty]) => [...key.split(','), String(qty)]));
   const sidebar = () =>
     `<a href="/users/abo/partlists/">My Part Lists</a>` +
-    `<a href="/users/abo/partlists/${SCRATCH}/">Task0 probe</a>` +
+    (anchorThisList ? `<a href="/users/abo/partlists/${SCRATCH}/">${listName} (0 parts)</a>` : '') +
     `<a href="/users/abo/partlists/${BOX}/">Bricks box (25 parts)</a>` +
     `<a href="/users/abo/partlists/${BOX2}/">Technic box (30 parts)</a>` +
     `<a href="/users/abo/partlists/999/">Ordered from Lego &amp; Bricklink</a>` +
@@ -58,8 +60,11 @@ function server({
   // Deliberately NO csrfmiddlewaretoken on the list page: the probe must fall back
   // to discovering the import form, and must not accept the token that the 404
   // decoy page below serves.
+  // `chrome` mimics the real page: the first heading is the site title, and the
+  // list's own name only appears in the sidebar anchor.
   const listPage = () =>
-    `<html><body>${headings ? `<h1 class="d-inline">${listName}</h1>` : sidebar()}${headings ? sidebar() : ''}` +
+    `<html><body>${chrome ? '<h1>Rebrickable</h1><title>Rebrickable - Build with LEGO</title>' : ''}` +
+    `${headings ? `<h2 class="d-inline">${listName}</h2>` : ''}${sidebar()}` +
     `${[...state.keys()].map((key) => `<a href="/p/${key}" data-part_cat_id="1" data-part_cat_name="Bricks"></a>`).join('')}</body></html>`;
   const importPage = () =>
     `<html><body><h1>${listName}</h1><form><input type="hidden" name="csrfmiddlewaretoken" value="${CSRF}"></form>${sidebar()}</body></html>`;
@@ -355,8 +360,31 @@ describe('task0 probe', () => {
 
   it('scrapes box links by name and puts the rest out of scope (D6)', async () => {
     const { evidence } = await boot(server()).promise;
-    expect([...evidence.scope.inScope].sort()).toEqual(['Bricks box (25 parts)', 'Technic box (30 parts)']);
+    // "(25 parts)" counts are stripped, so the D6 pattern matches the name alone
+    expect([...evidence.scope.inScope].sort()).toEqual(['Bricks box', 'Technic box']);
     expect(evidence.scope.outOfScope).toContain('Ordered from Lego & Bricklink');
+  });
+
+  it('takes the list name from the sidebar anchor, not from site chrome', async () => {
+    const { evidence, results } = await boot(server({ chrome: true })).promise;
+    expect(evidence.target.listName).toBe('Task0 probe');
+    expect(evidence.target.nameSource).toBe('sidebar anchor');
+    expect(evidence.target.nameCandidates[0]).toBe('Rebrickable');
+    expect(verdicts(results).net).toBe('PASS');
+  });
+
+  it('refuses when neither the sidebar nor a heading identifies the list', async () => {
+    const fixtures = server({ headings: false, chrome: false, anchorThisList: false });
+    const { promise } = boot(fixtures);
+    await expect(promise).rejects.toThrow(/no sidebar anchor for that id/);
+    expect(posts(fixtures.calls)).toHaveLength(0);
+  });
+
+  it('will not let site chrome satisfy the scratch guard', async () => {
+    const fixtures = server({ headings: false, chrome: true, anchorThisList: false });
+    const { promise } = boot(fixtures);
+    await expect(promise).rejects.toThrow(/"Rebrickable" \(read from the heading\) does not look like a scratch list/);
+    expect(posts(fixtures.calls)).toHaveLength(0);
   });
 
   it('refuses a list that is not a scratch list, without writing', async () => {

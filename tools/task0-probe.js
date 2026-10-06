@@ -226,14 +226,26 @@
       (html.match(/name=["']csrfmiddlewaretoken["']\s+value=["']([^"']+)["']/i) ||
         html.match(/value=["']([^"']+)["']\s+name=["']csrfmiddlewaretoken["']/i) ||
         [])[1] || '';
-    const headingOf = (html) => {
-      const candidates = [...html.matchAll(/<h[12][^>]*>([\s\S]*?)<\/h[12]>|<title[^>]*>([\s\S]*?)<\/title>/gi)];
-      for (const match of candidates) {
-        const text = decodeEntities((match[1] ?? match[2] ?? '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
-        if (text) return text;
-      }
-      return '';
-    };
+    // Headings are a last resort: on a real Rebrickable page the first h1/h2 is
+    // site chrome, which is what made the guard reject a correctly-named list.
+    // The sidebar anchor for THIS list id carries the list's own name.
+    const clean = (value) =>
+      decodeEntities(String(value).replace(/<[^>]+>/g, ' '))
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\s*\(\s*[\d.,\s]+parts?\s*\)\s*$/i, '')
+        .trim();
+    // `root` distinguishes the list page (/partlists/<id>/) from its sub-pages
+    // (/partlists/<id>/import/ etc). Only the root anchor names the list — the
+    // import link's own text is "Import", not the list name.
+    const anchorsOf = (html) =>
+      [...html.matchAll(/href=["']\/users\/[^/]+\/partlists\/(\d+)\/?(?![^"'#?]*\/)[^"']*["'][^>]*>([^<]{1,120})</gi)].map(
+        ([, id, raw]) => ({ id, name: clean(raw) }),
+      );
+    const headingsOf = (html) =>
+      [...html.matchAll(/<h[12][^>]*>([\s\S]*?)<\/h[12]>|<title[^>]*>([\s\S]*?)<\/title>/gi)]
+        .map((match) => clean((match[1] ?? match[2] ?? '').replace(/\|.*$/, ' ')))
+        .filter(Boolean);
     const importLinks = (html) =>
       [...html.matchAll(/href=["']([^"'#?]*partlists\/\d+\/[^"'#?]*import[^"'#?]*)["']/gi)].map((m) => m[1]);
 
@@ -262,17 +274,33 @@
     if (!csrf) {
       throw new Error(`no csrfmiddlewaretoken on any OK page — fetched: ${JSON.stringify(fetched)}`);
     }
-    const listName = cfg.listName || headingOf(page);
-    evidence.target = { user, listId, listName, csrfSource, fetched };
+    const sidebarName = anchorsOf(page).find((anchor) => anchor.id === listId)?.name || '';
+    const headings = headingsOf(page);
+    const listName = cfg.listName || sidebarName || headings[0] || '';
+    const nameSource = cfg.listName ? 'listName option' : sidebarName ? 'sidebar anchor' : headings.length ? 'heading' : 'none';
+    evidence.target = {
+      user,
+      listId,
+      listName,
+      nameSource,
+      csrfSource,
+      fetched,
+      nameCandidates: headings.slice(0, 5),
+      sidebarAnchors: anchorsOf(page).slice(0, 20),
+    };
     if (!listName) {
       throw new Error(
-        `no <h1>/<h2>/<title> text on ${listPageUrl} to check against the scratch rule — ` +
-          'pass { listName: "Task0 …" } to state it explicitly (the guard still applies)',
+        `cannot determine the name of list ${listId} from ${listPageUrl}: no sidebar anchor for that id and no ` +
+          `usable heading (headings: ${JSON.stringify(headings.slice(0, 5))}). ` +
+          'Pass { listName: "Task0 …" } to state it explicitly (the guard still applies).',
       );
     }
     log(`target: "${listName}" (#${listId}) as ${user}`);
     if (!cfg.scratchPattern.test(listName)) {
-      throw new Error(`"${listName}" does not look like a scratch list — rename it to "Task0 …" (§12)`);
+      throw new Error(
+        `"${listName}" (read from the ${nameSource}) does not look like a scratch list — rename it to "Task0 …" ` +
+          `or pass { listName } explicitly (§12). Headings on the page: ${JSON.stringify(headings.slice(0, 5))}`,
+      );
     }
     // no separate staging check: the scratch-pattern gate above already rejects any
     // name the staging list could have, and the probe hardcodes no staging name (§16.1).
@@ -410,10 +438,8 @@
       } else {
         // Scrape the sidebar out of the fetched HTML, so the probe behaves the
         // same whichever page it was pasted on.
-        for (const anchor of page.matchAll(/href=["']\/users\/[^/]+\/partlists\/(\d+)\/?[^"']*["'][^>]*>([^<]{1,120})</gi)) {
-          const [, id, raw] = anchor;
-          if (id === listId || !raw.trim()) continue;
-          const name = decodeEntities(raw).replace(/\s+/g, ' ').trim();
+        for (const { id, name } of anchorsOf(page)) {
+          if (id === listId || !name) continue;
           // D6 fail-closed: a list this probe cannot recognise as a box is not a
           // source, even though reading it would be harmless.
           if (cfg.boxNamePattern.test(name)) boxLinks.set(id, name);
