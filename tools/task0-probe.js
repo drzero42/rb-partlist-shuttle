@@ -18,6 +18,8 @@
  *        __task0()                                  // full sidebar walk
  *        __task0({ apiKey: '<catalog key>' })       // also runs 0.1 via the v3 API
  *        __task0({ listUrl: '/users/<you>/partlists/<id>/' })  // run from elsewhere
+ *        __task0({ only: ['0.1','0.1b'], apiKey: '<key>' })    // read-only, seconds:
+ *              // 0.1 = v3 field shape, 0.1b = hunt for a KEYLESS category source
  *
  * 0.5 (inc_spares) is DECLARED, not probed: this account tracks no spare parts,
  * so reading every box twice proves nothing — see §12 0.5.
@@ -42,6 +44,8 @@
     listUrl: '',
     /** Only if the page has no readable heading: state the name for the §12 guard. */
     listName: '',
+    /** Run a subset: { only: ['0.1','0.1b'] } makes a discovery re-run take seconds, not 40s of writes. */
+    only: null,
     /** 0.3 reads these box lists only — with 15 Part Lists, walking the sidebar is ~30 wasted GETs. */
     boxListIds: null,
     /** §12 0.5: this account has no spare parts, so the double read proves nothing. Opt in to compare one list anyway. */
@@ -87,6 +91,8 @@
     const cfg = { ...DEFAULTS, ...options };
     const results = [];
     const evidence = {};
+    const run = (id) => !cfg.only || cfg.only.includes(id);
+    const writesSelected = ['0.4', '0.3', '0.3b'].some(run);
     const log = (...args) => console.log('[task0]', ...args);
 
     function record(id, verdict, summary, extra) {
@@ -312,11 +318,12 @@
     // name the staging list could have, and the probe hardcodes no staging name (§16.1).
     if (window.__task0Ran === listId) throw new Error('this list was already probed this page load — reload first');
 
-    const gate = window.prompt(
+    if (!writesSelected) log(`only=${JSON.stringify(cfg.only)}: no write items selected — nothing will be written`);
+    const gate = writesSelected ? window.prompt(
       `Writing to "${listName}" (#${listId}) as ${user}.\n` +
         'Appends are subtracted again at the end; box lists are only READ.\n\nType TASK0 to continue.',
-    );
-    if (gate !== 'TASK0') throw new Error('aborted at the gate — nothing was written');
+    ) : 'TASK0';
+    if (writesSelected && gate !== 'TASK0') throw new Error('aborted at the gate — nothing was written');
     window.__task0Ran = listId;
 
     const baseline = await readScratch();
@@ -325,6 +332,11 @@
 
     let abort = null;
     try {
+      let pageAfter = page;
+      let pageAttributes = 0;
+      if (!run('0.4')) {
+        for (const id of ['0.4', '0.2', '0.6']) record(id, 'SKIP', 'not selected (read-only run)');
+      } else {
       /* ---- 0.4 CSRF on POST: DOM token, token reuse, cookie token ---- */
       const fixture = [cfg.mold, cfg.plain];
       const first = await append(fixture, csrf, '0.4-dom-first');
@@ -383,9 +395,9 @@
 
       // Re-read the rendered page: the appends above must be visible there, with
       // their literal ids, for the HTML category fallback (§4.4) to be usable.
-      const pageAfter = await (await request(`/users/${user}/partlists/${listId}/`)).text();
+      pageAfter = await (await request(`/users/${user}/partlists/${listId}/`)).text();
       const htmlHasMoldId = pageAfter.includes(cfg.mold[0]);
-      const pageAttributes = (pageAfter.match(/data-part_cat_(?:id|name)/g) || []).length;
+      pageAttributes = (pageAfter.match(/data-part_cat_(?:id|name)/g) || []).length;
 
       const sentKeys = [keyOf(cfg.mold), keyOf(cfg.plain)].sort();
       const gotKeys = [moldRow, plainRow].filter(Boolean).map(keyOf).sort();
@@ -397,9 +409,10 @@
           `mold id appears literally in the rendered list page=${htmlHasMoldId}`,
         { sent: sentKeys, exported: gotKeys, htmlContainsMoldId: htmlHasMoldId, listPageAttributes: pageAttributes },
       );
+      }
 
       /* ---- 0.1 categories: v3 API (needs a key) and the HTML fallback ---- */
-      const renderProbe = await append([cfg.plain], csrf, '0.1-render');
+      const renderProbe = run('0.4') ? await append([cfg.plain], csrf, '0.1-render') : { catAttributes: 0 };
       if (!cfg.apiKey) {
         record(
           '0.1',
@@ -468,7 +481,9 @@
       }
 
       evidence.scope = { inScope: [...boxLinks.values()], outOfScope };
-      if (largest.length < 20) {
+      if (!run('0.3')) {
+        record('0.3', 'SKIP', 'not selected (read-only run)');
+      } else if (largest.length < 20) {
         record(
           '0.3',
           'SKIP',
@@ -499,7 +514,7 @@
       }
 
       /* ---- 0.3b reproduce the merge with the two rows alone ---- */
-      {
+      if (run('0.3b')) {
         const before = await readScratch();
         const merged = await append(cfg.mergeRows, csrf, '0.3b-append');
         const after = await readScratch();
@@ -518,6 +533,48 @@
             `subtract ${subtract.httpStatus}/${subtract.status}; round-trip restored=${JSON.stringify(settled.map(keyOf).sort()) === JSON.stringify(before.map(keyOf).sort())}` +
             (merged.warnings ? ` | warning: ${merged.warnings.slice(0, 200)}` : ''),
           { appended: cfg.mergeRows, appeared: added, warnings: merged.warnings, subtract: { status: subtract.status, warnings: subtract.warnings }, settled: settled.map(keyOf) },
+        );
+      }
+
+      /* ---- 0.1b is there a keyless part→category source at all? ---- */
+      {
+        // §12 showed the STATIC html has no data-part_cat_* — but the rows are drawn
+        // client-side, so category data must arrive from somewhere reachable with the
+        // session alone. Probe the obvious internal endpoints and report the field
+        // names instead of assuming them.
+        const probes = [];
+        for (const url of [
+          `${listPageUrl}parts/?format=json&inc_spares=0`,
+          `${listPageUrl}parts/json/`,
+          `${listPageUrl}parts/?format=json&inc_part_details=1`,
+        ]) {
+          const response = await request(url);
+          const text = await response.text();
+          const entry = { url, status: response.status, contentType: response.headers?.get('content-type') || '', bytes: text.length };
+          if (response.ok) {
+            try {
+              const body = JSON.parse(text);
+              const first = Array.isArray(body) ? body[0] : Array.isArray(body?.results) ? body.results[0] : body;
+              entry.shape = first && typeof first === 'object' ? Object.keys(first) : [typeof first];
+              entry.rows = Array.isArray(body) ? body.length : body?.results?.length ?? null;
+              entry.categoryFields = (entry.shape || []).filter((key) => /cat|categor|group/i.test(key));
+            } catch {
+              entry.notJson = text.replace(/\s+/g, ' ').slice(0, 120);
+            }
+          }
+          probes.push(entry);
+          await sleep(cfg.delayMs);
+        }
+        const embedded = [...page.matchAll(/["'](\w*cat\w*)["']\s*:/gi)].map((m) => m[1]);
+        const usable = probes.find((probe) => probe.categoryFields?.length);
+        record(
+          '0.1b',
+          usable ? 'PASS' : probes.some((probe) => probe.status === 200) || embedded.length ? 'CHECK' : 'FAIL',
+          usable
+            ? `keyless source at ${usable.url}: ${usable.rows} rows, category fields ${JSON.stringify(usable.categoryFields)} (all fields ${JSON.stringify(usable.shape)})`
+            : `no endpoint exposed category fields; statuses ${JSON.stringify(probes.map((probe) => probe.status))}; ` +
+              `category-looking keys embedded in the page: ${JSON.stringify([...new Set(embedded)].slice(0, 12))}`,
+          { probes, embedded: [...new Set(embedded)], usable: usable?.url || null },
         );
       }
 

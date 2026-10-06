@@ -431,6 +431,7 @@ net-zero check passed (`4 baseline rows, 0 un-undone`).
 |------|---------|-------------------------------|------|
 | 0.1 | **FAIL** | `part_cat_id` is returned, **`part_cat_name` is not**, and the DOM fallback is dead (0 `data-part_cat_*` on the list page and in the import `html`). Follow-up read-only call: items DO carry `name` (`4592` "Lever Small Base", `4593` "Lever Small") and `/lego/part_categories/` maps id→name (`11` Bricks, `32` Bars, Ladders and Fences) — names are reachable, but only with a key. Superseded by §12.3 item 6 | 2026-10-06 |
 | 0.2 | **PASS** | omitting `fix_molds` keeps ids literal (`48729b,0` → `48729b,0`, nothing rewritten); the response `html` also echoes `Using settings: Fix Molds = False`, which the tool now asserts per write | 2026-10-06 |
+| 0.3b | **CHECK → explained** | appending `4592,1` + `4593,0` **alone** produced one line: `298c02,1`. Rebrickable collapses known components into the **composite design id** (design 298 "Lever" = 4592 base + 4593 lever) while still echoing `Fix Molds = False`. Subtracting the same two rows restored the list (`round-trip restored=true`) → the collapse is symmetric | 2026-10-06 |
 | 0.3 | **PASS + warning** | 300 rows stayed **one synchronous POST** each way (10.6s / 14.2s, no confirm/progress keys) → atomicity model holds. But the response warned `some parts were CHANGED during import: Merging 1 x part 4592 in color 1, 1 x part 4593 in color 0` **while Fix Molds = False** → §7.5 id-level verification is now mandatory | 2026-10-06 |
 | 0.4 | **PASS** | token read from the Part-List page served 4 appends + 3 subtracts with no re-read; the `csrftoken` cookie is HttpOnly (unreadable from JS), so the DOM is the only possible source (§5.2) | 2026-10-06 |
 | 0.5 | declared | no spare parts in this account (user-declared) → `inc_spares` default **OFF**; not probed | 2026-10-06 |
@@ -440,10 +441,12 @@ net-zero check passed (`4 baseline rows, 0 un-undone`).
 ### 12.3 What Task 0 changed in the design
 
 1. **Verification is id-level, not count-level (§7.5).** The server can report
-   "some parts were CHANGED during import" and still give a clean line count. The
+   "some parts were CHANGED during import" and still give a clean line count, so the
    apply loop must re-read each written list's `rbpartscsv` and diff
-   `(Part,Color,Qty)` against the plan before touching the next box, and treat a
-   `Merging …` warning as a failed run.
+   `(Part,Color,Qty)` against the plan before touching the next box. A `Merging …`
+   warning is **not automatically a failed run** (0.3b shows the collapse is benign
+   and symmetric) — the rule is: the re-read must be explainable as
+   composite⇄component equivalence, otherwise it is a failure and the run stops.
 2. **Categories come from ids + one lookup (§4.4).** `part_cat_name` is not in the
    parts response; the DOM scrape has nothing to read. Routing uses `part_cat_id`,
    names use a single cached `/api/v3/lego/part_categories/` call.
@@ -454,17 +457,21 @@ net-zero check passed (`4 baseline rows, 0 un-undone`).
    promise weakest — recommended.
 4. **Budget for slow writes (§8).** ~10-14s per 300-row import means the progress log
    must show which box is in flight; nothing about the plan changes.
-5. **Unknown: which part pairs merge — and the run's merge is not traceable to the
-   rows I appended.** `4592`/`4593` are two *different* parts (Lever Small Base /
-   Lever Small, both cat 32), so folding them onto one line is a real inventory
-   change, not a colour alias. The first 300 rows of #717494 (`Big storage boxes`)
-   contain **neither id** — and the probe never recorded which box list it actually
-   borrowed from, so the trigger is still unidentified. Two fixes: 0.3 now records
-   `sourceList`, and a new **0.3b** appends exactly those two rows to the scratch
-   list in isolation (~1s, undone immediately) to see whether the pair alone
-   reproduces the warning and which line survives. Until 0.3b has an answer, §6.1's
-   `missing` verdict must not claim a part is absent without listing the same-prefix
-   ids the box does hold.
+5. **Resolved: the server collapses component pairs into composite ids (0.3b).**
+   `4592` + `4593` → `298c02`, symmetrically, while `Fix Molds = False`. Ids shaped
+   `<design>c<num>` are Rebrickable's composite/assembly ids, inventory-equivalent to
+   their component set — a *different* phenomenon from the `48729a/b/c` mould variants
+   of D9/D10. Consequences:
+   - §6.1 must not declare `missing` when the box holds a composite whose components
+     the MOC lists separately, or the reverse; the near-miss report expands the id both
+     ways before calling it a shortfall.
+   - D10's exact `Part,Color` rule still governs **writes** (never invent an id), but
+     the feasibility read treats composite⇄component as an equivalence class it
+     **shows** in the preview rather than silently picks. Which pairs collapse is
+     catalog data with no keyless source, so the MVP detects the `cNN` shape, warns,
+     and lets the user resolve.
+   - 0.3 now records `sourceList` — the original warning could not be traced to the
+     box rows I assumed it came from.
 
 6. **Return must work without an API key (user decision, 2026-10-06), which kills
    category routing as the mechanism.** §4.4's inputs are unavailable keylessly, and
@@ -480,6 +487,19 @@ net-zero check passed (`4 baseline rows, 0 un-undone`).
    removes the last credential-ish surface from §10, and makes §4.4 unnecessary — at
    the cost of D8's storage-invariant framing, which becomes an optimisation instead
    of the mechanism. **Awaiting approval before §6.2/§9/§10/§4.4 are rewritten.**
+   Item 6's premise is itself untested: the part rows are drawn client-side, so a
+   keyless part→category source may exist after all — **0.1b** probes the internal
+   endpoints for one. If it finds category fields, category routing (D8) survives
+   with no key; if not, the contents/prefix mechanism above is the only option.
+
+7. **Routing memory needs a flush story before §9 gains a key.** Whatever mechanism
+   wins, anything remembered in GM storage must be *invalidate-on-read*, not
+   time-expired: each run already re-reads every box's contents (§7.2), so a stored
+   hint is dropped the moment a box actually contains the part again, and the
+   settings panel (§8) gets an explicit "clear routing memory". No TTL — a silent
+   expiry would change behaviour between two runs of the same file, which is worse
+   than a stale hint the user can clear. Adding a §9 key for this is blocked on the
+   item 6 decision.
 
 ---
 

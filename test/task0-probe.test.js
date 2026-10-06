@@ -74,11 +74,12 @@ function server({
   async function fetchImpl(url, init = {}) {
     const target = new URL(url, 'https://rebrickable.com');
     const { pathname, searchParams } = target;
-    const reply = (status, body) => {
+    const reply = (status, body, type = 'text/html') => {
       calls.push({ method: init.method || 'GET', url, status });
       return {
         status,
         ok: status >= 200 && status < 300,
+        headers: { get: (name) => (name.toLowerCase() === 'content-type' ? type : null) },
         text: async () => body,
         json: async () => JSON.parse(body),
       };
@@ -98,7 +99,12 @@ function server({
       const rows = searchParams.get('inc_spares') === '1' && spares ? [...boxes[parts[1]], ...boxSpares] : boxes[parts[1]];
       return reply(200, toCsv(rows));
     }
-    if (parts && parts[1] === SCRATCH) return reply(200, scratchCsv());
+    if (parts && parts[1] === SCRATCH) {
+      // only the documented export format answers; ?format=json is a 404 here so
+      // 0.1b can distinguish "endpoint exists" from "guessed URL returned a table"
+      if (searchParams.get('format') !== 'rbpartscsv') return reply(404, errorPage);
+      return reply(200, scratchCsv());
+    }
 
     if (init.method === 'POST' && pathname === `/users/abo/partlists/${SCRATCH}/importparts/slow/`) {
       const form = init.body;
@@ -153,6 +159,10 @@ function server({
       );
     }
 
+    const jsonParts = pathname.match(/^\/users\/abo\/partlists\/(\d+)\/parts\/(json|\/?format=json.*)$/);
+    if (pathname === `/users/abo/partlists/${SCRATCH}/parts/json/`) {
+      return reply(200, JSON.stringify([{ part_num: '3001', color: 0, qty: 4, part_cat_id: 11, part_cat_name: 'Bricks' }]), 'application/json');
+    }
     if (pathname === '/api/v3/lego/parts/') {
       return reply(
         200,
@@ -412,6 +422,39 @@ describe('task0 probe', () => {
     const { promise } = boot(fixtures, { listName: 'Big storage boxes' });
     await expect(promise).rejects.toThrow(/does not look like a scratch list/);
     expect(posts(fixtures.calls)).toHaveLength(0);
+  });
+
+  it('0.1b finds a keyless category field when an internal endpoint has one', async () => {
+    const { results, evidence } = await boot(server()).promise;
+    expect(verdicts(results)['0.1b']).toBe('PASS');
+    expect(evidence['0.1b'].usable).toBe(`/users/abo/partlists/${SCRATCH}/parts/json/`);
+    expect(evidence['0.1b'].probes.find((probe) => probe.url.endsWith('/parts/json/')).categoryFields).toEqual([
+      'part_cat_id',
+      'part_cat_name',
+    ]);
+    expect(results.find((result) => result.id === '0.1b').summary).toMatch(/keyless source/);
+  });
+
+  it('0.1b fails honestly when no keyless category source exists', async () => {
+    const fixtures = server();
+    const real = fixtures.fetch;
+    fixtures.fetch = async (url, init) => {
+      if (String(url).includes('/parts/json/')) return { status: 404, ok: false, headers: { get: () => 'text/html' }, text: async () => '<h1>404</h1>' };
+      return real(url, init);
+    };
+    const { results } = await boot(fixtures).promise;
+    expect(verdicts(results)['0.1b']).toBe('FAIL');
+  });
+
+  it('runs a read-only subset without writing anything', async () => {
+    const fixtures = server();
+    const { results } = await boot(fixtures, { only: ['0.1b', '0.5'] }).promise;
+    expect(posts(fixtures.calls)).toHaveLength(0);
+    const seen = verdicts(results);
+    expect(seen['0.4']).toBe('SKIP');
+    expect(seen['0.3']).toBe('SKIP');
+    expect(seen['0.1b']).toBe('PASS');
+    expect([...fixtures.state]).toEqual(BASELINE);
   });
 
   it('scrapes box links by name and puts the rest out of scope (D6)', async () => {
