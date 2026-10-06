@@ -40,6 +40,8 @@
     apiKey: '',
     /** Run from anywhere: point at the scratch list explicitly. */
     listUrl: '',
+    /** Only if the page has no readable heading: state the name for the §12 guard. */
+    listName: '',
     /** 0.3 reads these box lists only — with 15 Part Lists, walking the sidebar is ~30 wasted GETs. */
     boxListIds: null,
     /** §12 0.5: this account has no spare parts, so the double read proves nothing. Opt in to compare one list anyway. */
@@ -115,7 +117,7 @@
       form.set('file', new Blob([toCsv(rows)], { type: 'text/csv' }), `${label}.csv`);
 
       const started = Date.now();
-      const response = await request(`/users/${user}/partlists/${listId}/importparts/slow/`, {
+      const response = await request(importEndpoint, {
         method: 'POST',
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
         body: form,
@@ -194,8 +196,16 @@
       );
     }
     const { user, listId } = target;
-    const importPageUrl = `/users/${user}/partlists/${listId}/importparts/`;
+    const listPageUrl = `/users/${user}/partlists/${listId}/`;
+    const importEndpoint = `/users/${user}/partlists/${listId}/importparts/slow/`;
     const cookieToken = (document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/) || [])[1] || '';
+    // §5.1 verified the POST endpoint, not the page that hosts the import form —
+    // so don't assume its path: use the token from the list page, else follow the
+    // page's own "import" links. Statuses are recorded for the report.
+    const importGuesses = [
+      `/users/${user}/partlists/${listId}/importparts/`,
+      `/users/${user}/partlists/${listId}/import/`,
+    ];
 
     const readScratch = async () => {
       const response = await request(`/users/${user}/partlists/${listId}/parts/?format=rbpartscsv&inc_spares=0`);
@@ -203,21 +213,63 @@
       return parseCsv(await response.text());
     };
 
-    /* ---- scratch-list guard (§12) ---- */
-    const page = await (await request(`/users/${user}/partlists/${listId}/`)).text();
-    const importHtml = await (await request(importPageUrl)).text();
-    const csrf =
-      (importHtml.match(/name=["']csrfmiddlewaretoken["']\s+value=["']([^"']+)["']/i) ||
-        importHtml.match(/value=["']([^"']+)["']\s+name=["']csrfmiddlewaretoken["']/i) ||
+    const fetched = [];
+    async function getHtml(url) {
+      const response = await request(url);
+      const html = await response.text();
+      // A 404 page is a full site page and carries its own csrfmiddlewaretoken,
+      // so only an OK response may supply the token or the list name.
+      fetched.push({ url, status: response.status, ok: response.ok, bytes: html.length });
+      return response.ok ? html : '';
+    }
+    const csrfOf = (html) =>
+      (html.match(/name=["']csrfmiddlewaretoken["']\s+value=["']([^"']+)["']/i) ||
+        html.match(/value=["']([^"']+)["']\s+name=["']csrfmiddlewaretoken["']/i) ||
         [])[1] || '';
-    if (!csrf) throw new Error(`no csrfmiddlewaretoken on ${importPageUrl} — logged in? list exists?`);
-    const listName =
-      ((page.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    evidence.target = { user, listId, listName };
-    if (!listName) throw new Error('could not read the list name from the page — refusing to write blind');
+    const headingOf = (html) => {
+      const candidates = [...html.matchAll(/<h[12][^>]*>([\s\S]*?)<\/h[12]>|<title[^>]*>([\s\S]*?)<\/title>/gi)];
+      for (const match of candidates) {
+        const text = decodeEntities((match[1] ?? match[2] ?? '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+        if (text) return text;
+      }
+      return '';
+    };
+    const importLinks = (html) =>
+      [...html.matchAll(/href=["']([^"'#?]*partlists\/\d+\/[^"'#?]*import[^"'#?]*)["']/gi)].map((m) => m[1]);
+
+    /* ---- scratch-list guard (§12) ---- */
+    const page = await getHtml(listPageUrl);
+    if (!page) {
+      throw new Error(
+        `${listPageUrl} answered ${fetched[0].status} — not logged in, or that list id is not yours ` +
+          `(user "${user}", list ${listId}; pass { listUrl: '…' } if the URL was odd)`,
+      );
+    }
+    let csrf = csrfOf(page);
+    let csrfSource = listPageUrl;
+    if (!csrf) {
+      for (const url of [...importGuesses, ...importLinks(page)]) {
+        const html = await getHtml(url);
+        const token = csrfOf(html);
+        if (token) {
+          csrf = token;
+          csrfSource = url;
+          break;
+        }
+        await sleep(cfg.delayMs);
+      }
+    }
+    if (!csrf) {
+      throw new Error(`no csrfmiddlewaretoken on any OK page — fetched: ${JSON.stringify(fetched)}`);
+    }
+    const listName = cfg.listName || headingOf(page);
+    evidence.target = { user, listId, listName, csrfSource, fetched };
+    if (!listName) {
+      throw new Error(
+        `no <h1>/<h2>/<title> text on ${listPageUrl} to check against the scratch rule — ` +
+          'pass { listName: "Task0 …" } to state it explicitly (the guard still applies)',
+      );
+    }
     log(`target: "${listName}" (#${listId}) as ${user}`);
     if (!cfg.scratchPattern.test(listName)) {
       throw new Error(`"${listName}" does not look like a scratch list — rename it to "Task0 …" (§12)`);
@@ -242,6 +294,12 @@
       /* ---- 0.4 CSRF on POST: DOM token, token reuse, cookie token ---- */
       const fixture = [cfg.mold, cfg.plain];
       const first = await append(fixture, csrf, '0.4-dom-first');
+      if (first.httpStatus === 404 || first.httpStatus === 405) {
+        throw new Error(
+          `§5.1 has drifted: POST ${importEndpoint} answered ${first.httpStatus}. ` +
+            `Token came from ${csrfSource}; import links on the list page: ${JSON.stringify(importLinks(page))}`,
+        );
+      }
       const reused = await append([cfg.plain], csrf, '0.4-dom-second');
       const cookie = cookieToken ? await append([cfg.plain], cookieToken, '0.4-cookie') : null;
 

@@ -26,7 +26,15 @@ const BASELINE = [
 ];
 
 /** @returns a fake fetch + the call log + the mutable scratch state */
-function server({ normalize = (part) => part, listName = 'Task0 probe', spares = true } = {}) {
+function server({
+  normalize = (part) => part,
+  listName = 'Task0 probe',
+  spares = true,
+  listStatus = 200,
+  importFormPath = `/users/abo/partlists/${SCRATCH}/import/`,
+  endpointStatus = 200,
+  headings = true,
+} = {}) {
   const calls = [];
   const state = new Map(BASELINE);
   // BOX2 is deliberately larger, so the sidebar walk picks it for 0.3 and a
@@ -45,9 +53,13 @@ function server({ normalize = (part) => part, listName = 'Task0 probe', spares =
     `<a href="/users/abo/partlists/${BOX}/">Bricks box (25 parts)</a>` +
     `<a href="/users/abo/partlists/${BOX2}/">Technic box (30 parts)</a>` +
     `<a href="/users/abo/partlists/999/">Ordered from Lego &amp; Bricklink</a>` +
-    `<a href="/users/abo/lists/4242/">A Custom List</a>`;
+    `<a href="/users/abo/lists/4242/">A Custom List</a>` +
+    `<a href="${importFormPath}">Import</a>`;
+  // Deliberately NO csrfmiddlewaretoken on the list page: the probe must fall back
+  // to discovering the import form, and must not accept the token that the 404
+  // decoy page below serves.
   const listPage = () =>
-    `<html><body><h1 class="d-inline">${listName}</h1>${sidebar()}` +
+    `<html><body>${headings ? `<h1 class="d-inline">${listName}</h1>` : sidebar()}${headings ? sidebar() : ''}` +
     `${[...state.keys()].map((key) => `<a href="/p/${key}" data-part_cat_id="1" data-part_cat_name="Bricks"></a>`).join('')}</body></html>`;
   const importPage = () =>
     `<html><body><h1>${listName}</h1><form><input type="hidden" name="csrfmiddlewaretoken" value="${CSRF}"></form>${sidebar()}</body></html>`;
@@ -65,8 +77,14 @@ function server({ normalize = (part) => part, listName = 'Task0 probe', spares =
       };
     };
 
-    if (init.method !== 'POST' && pathname === `/users/abo/partlists/${SCRATCH}/importparts/`) return reply(200, importPage());
-    if (init.method !== 'POST' && pathname === `/users/abo/partlists/${SCRATCH}/`) return reply(200, listPage());
+    // 404 pages are full site pages and carry their own csrf token: a decoy to
+    // prove the probe only trusts OK responses.
+    const errorPage = `<html><body><h1>Not Found</h1><input type="hidden" name="csrfmiddlewaretoken" value="${CSRF}"></body></html>`;
+    if (init.method !== 'POST' && pathname === `/users/abo/partlists/${SCRATCH}/importparts/`) return reply(404, errorPage);
+    if (init.method !== 'POST' && pathname === importFormPath) return reply(200, importPage());
+    if (init.method !== 'POST' && pathname === `/users/abo/partlists/${SCRATCH}/`) {
+      return listStatus === 200 ? reply(200, listPage()) : reply(listStatus, errorPage);
+    }
 
     const parts = pathname.match(/^\/users\/abo\/partlists\/(\d+)\/parts\/$/);
     if (parts && boxes[parts[1]]) {
@@ -80,6 +98,7 @@ function server({ normalize = (part) => part, listName = 'Task0 probe', spares =
       const token = form.get('csrfmiddlewaretoken');
       const action = form.get('action');
       const rows = (await form.get('file').text()).split('\r\n').filter(Boolean).slice(1);
+      // logged whatever the outcome, so a rejected attempt is still visible
       calls.push({
         method: 'POST',
         url,
@@ -91,7 +110,8 @@ function server({ normalize = (part) => part, listName = 'Task0 probe', spares =
         source: form.get('external_source'),
       });
 
-      if (token !== CSRF) return reply(403, '<h1>403 Forbidden</h1>');
+      if (endpointStatus !== 200) return reply(endpointStatus, errorPage);
+      if (token !== CSRF) return reply(403, errorPage);
 
       for (const row of rows) {
         const [part, color, qty] = row.split(',');
@@ -294,6 +314,42 @@ describe('task0 probe', () => {
     const fixtures = server();
     const { promise } = boot(fixtures, {}, () => 'TASK0', '/settings/api/');
     await expect(promise).rejects.toThrow(/this page \(\/settings\/api\/\) is not one of your Part Lists/);
+    expect(posts(fixtures.calls)).toHaveLength(0);
+  });
+
+  it('ignores a CSRF token served by a 404 page and discovers the real form', async () => {
+    const { evidence } = await boot(server()).promise;
+    expect(evidence.target.csrfSource).toBe(`/users/abo/partlists/${SCRATCH}/import/`);
+    const decoy = evidence.target.fetched.find((entry) => entry.url.endsWith('/importparts/'));
+    expect(decoy.status).toBe(404);
+    expect(decoy.ok).toBe(false);
+  });
+
+  it('reports the status when the list page itself is not readable', async () => {
+    const fixtures = server({ listStatus: 404 });
+    const { promise } = boot(fixtures);
+    await expect(promise).rejects.toThrow(/answered 404/);
+    expect(posts(fixtures.calls)).toHaveLength(0);
+  });
+
+  it('aborts loudly if the §5.1 import endpoint has drifted', async () => {
+    const fixtures = server({ endpointStatus: 404 });
+    const { promise } = boot(fixtures);
+    await expect(promise).rejects.toThrow(/5\.1 has drifted/);
+    expect(fixtures.calls.filter((call) => call.action === 'A')).toHaveLength(1);
+    expect([...fixtures.state]).toEqual(BASELINE);
+  });
+
+  it('accepts an explicit listName when the page exposes no heading', async () => {
+    const { evidence, results } = await boot(server({ headings: false }), { listName: 'Task0 probe' }).promise;
+    expect(evidence.target.listName).toBe('Task0 probe');
+    expect(verdicts(results).net).toBe('PASS');
+  });
+
+  it('refuses an explicit listName that is not scratch-shaped', async () => {
+    const fixtures = server({ headings: false });
+    const { promise } = boot(fixtures, { listName: 'Big storage boxes' });
+    await expect(promise).rejects.toThrow(/does not look like a scratch list/);
     expect(posts(fixtures.calls)).toHaveLength(0);
   });
 

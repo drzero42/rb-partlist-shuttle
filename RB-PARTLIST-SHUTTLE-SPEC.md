@@ -353,10 +353,20 @@ and call `__task0()`. It Appends, reads back, Subtracts, and prints a verdict ta
 plus JSON evidence.
 
 **Any tab of the scratch list works.** The probe takes the list id from the current
-URL (or an explicit `{ listUrl }`), then fetches the Import page itself for its
-CSRF token and scrapes the Part-List sidebar out of that HTML — so it does not
-depend on which tab it was pasted into, and it refuses with the pathname it saw
-rather than a mystery error. The box lists it reads come from that scrape filtered
+URL (or an explicit `{ listUrl }`) and scrapes the Part-List sidebar out of the
+fetched HTML — so it does not depend on which tab it was pasted into, and it
+refuses with the pathname and HTTP status it saw rather than a mystery error.
+
+**The CSRF token is discovered, never assumed.** §5.1 verified the *POST endpoint*
+(`…/importparts/slow/`); the path of the page hosting the import form was never
+checked, and a first run found `…/importparts/` answering **404**. Rebrickable
+renders its error pages as full site pages — with their own `csrfmiddlewaretoken`
+input — so a token scraped from a non-OK response looks perfectly valid. The probe
+therefore only accepts tokens from `response.ok` pages, trying the list page itself
+first, then its own `import` links, and records which URL supplied the token in the
+report (`target.csrfSource`) — the answer `rb-read.js`/`rb-write.js` need. If the
+page has no readable heading, pass `{ listName: 'Task0 …' }` to state it explicitly
+(§12's scratch guard still applies to it). The box lists it reads come from that scrape filtered
 by `boxNamePattern` (D6), and the report's `scope` block names what it put in and
 out — which doubles as a check of the pattern against the account's real names.
 
