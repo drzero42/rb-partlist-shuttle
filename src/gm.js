@@ -20,3 +20,33 @@ export function loadConfig() {
 export function saveConfig(patch) {
   for (const [key, value] of Object.entries(patch)) GM_setValue(key, value);
 }
+
+/** Spec §4.4 cache: {categoryOf, categoryName, etag, checkedAt}, or undefined. */
+export const readCatalogueCache = () => GM_getValue('catalogCache');
+export const writeCatalogueCache = (cache) => GM_setValue('catalogCache', cache);
+
+/**
+ * Cross-origin GET, only for the catalogue CDN (`@connect cdn.rebrickable.com`).
+ *
+ * @param {string} url
+ * @param {Record<string, string>} headers
+ * @returns {Promise<{status: number, etag: string|null, body: ArrayBuffer}>}
+ */
+export function cdnGet(url, headers) {
+  return new Promise((resolve, reject) => {
+    GM_xmlhttpRequest({
+      url,
+      headers,
+      responseType: 'arraybuffer',
+      onload: (res) =>
+        resolve({
+          status: res.status,
+          etag: /^etag:\s*(.+)$/im.exec(res.responseHeaders)?.[1].trim() ?? null,
+          body: res.response,
+        }),
+      onerror: () => reject(new Error(`could not reach ${url}`)),
+      ontimeout: () => reject(new Error(`timed out fetching ${url}`)),
+      timeout: 60000,
+    });
+  });
+}

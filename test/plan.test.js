@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyLists, diffParts, expectedAfter, planConsume, planReturn } from '../src/plan.js';
+import { classifyLists, diffParts, expectedAfter, importProblem, planConsume, planReturn } from '../src/plan.js';
 
 const config = { usedListName: 'Used for MOCs', boxNamePattern: '\\bbox(?:es)?\\b' };
 const r = (part, color, qty) => ({ part, color, qty });
@@ -160,5 +160,26 @@ describe('post-write verification', () => {
       { part: '298c02', color: '1', expected: 0, actual: 2 },
     ]);
     expect(diffParts(before, [...before].reverse())).toEqual([]);
+  });
+});
+
+describe('importProblem', () => {
+  const ok = { status: 'success', html: 'Using settings: Fix Molds = False<br>Imported 2 parts' };
+
+  it('accepts a clean response', () => {
+    expect(importProblem(ok)).toBeNull();
+  });
+
+  it('rejects a failed status, with the server text', () => {
+    expect(importProblem({ status: 'error', msg: 'Part 9999 not found' })).toMatch(/Part 9999 not found/);
+  });
+
+  it('rejects a response without the Fix Molds = False echo', () => {
+    expect(importProblem({ status: 'success', html: 'Using settings: Fix Molds = True' })).toMatch(/Fix Molds/);
+  });
+
+  it('rejects a server-side id change', () => {
+    const html = `${ok.html}<br>Warnings x1 (some parts were CHANGED during import): Merging 1 x part 4592`;
+    expect(importProblem({ status: 'success', html })).toMatch(/CHANGED during import/);
   });
 });

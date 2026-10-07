@@ -38,16 +38,17 @@ spec wins. Update this file to match it, never the other way round.
 src/index.js    entry + page guard
 src/csv.js      CSV parse (quotes, CRLF) + rbpartscsv rows       ┐ pure, imports only
 src/plan.js     classify lists, consume/return plans, verify diff ┘ each other; tested
+src/rb.js       site reads, Part List index scrape, CSRF token, import POST
+src/catalog.js  catalogue CDN fetch, gunzip, daily conditional cache
+src/ui.js       button bar, panel (log, preview + questions), backup download
 src/gm.js       the only GM_* user: config, catalogCache, xmlhttpRequest
 scripts/build.mjs   esbuild → dist/rb-partlist-shuttle.user.js + metadata banner
 scripts/release.mjs checks, tag, push (CI gate: --check)
 test/           Vitest
 ```
 
-Still to add (spec §11): `rb.js`, `catalog.js` and `ui.js`, as thin I/O
-verified on the site. Every rule worth testing belongs in `plan.js`.
-
-Don't create stub modules ahead of the code.
+`rb.js`, `catalog.js`, `ui.js` and `index.js` are thin I/O and are verified on the
+site, not in Vitest. Every rule worth testing belongs in `plan.js` or `csv.js`.
 
 ## Commands
 
@@ -75,6 +76,6 @@ uploads the release asset. Violentmonkey auto-updates from
 
 ## Next up
 
-`rb.js` (site reads/writes), `catalog.js` (CDN fetch + cache) and `ui.js`
-(buttons, preview with questions, progress log, backup download, settings),
-then wire them in `index.js`.
+Verify on the site (spec §10 *unverified* rows): the Custom List CSV header,
+the `/users/<u>/partlists/` scrape, and the CSRF token. Then try a small
+consume/return round trip on a test Custom List.

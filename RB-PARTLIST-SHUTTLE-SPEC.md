@@ -184,11 +184,15 @@ All planning is a pure function of the reads. No network, no DOM.
    then append to each destination box list.
 
 ### 6.3 Preview
-One table: row → list → qty, with the routing reason (exact match / category /
-asked). It also shows offenders, unresolved questions, the catalogue cache age
-(return), and the list names that were *not* classified as boxes, so a wrong
-`boxNamePattern` is visible. Confirm is absent until every question is answered
-and there are no offenders.
+The preview shows:
+- one expandable section per write, as list → rows → qty;
+- the offenders;
+- each question, with the candidate lists and their counts. Answered questions
+  stay visible and can be changed.
+- the box lists and non-box lists, so a wrong `boxNamePattern` is visible;
+- for return, the catalogue's age.
+
+Confirm is absent until every question is answered and there are no offenders.
 
 ---
 
@@ -196,8 +200,9 @@ and there are no offenders.
 
 1. **Backup:** before the first write, save each affected list's `rbpartscsv`
    (from the reads used for the plan) as a download, using a Blob and
-   `<a download>`. Name: `rbps-<list name>-<list id>-<UTC timestamp>.csv`. If a
-   backup fails, write nothing.
+   `<a download>`. Name: `rbps-<list name>-<list id>-<UTC timestamp>.csv`. The
+   browser gives no failure signal for these downloads, so the contents also
+   stay in the panel's preview tables.
 2. **Order:** all subtracts first, then all appends. A subtract on stale data
    fails before anything is appended.
 3. **Sequential:** one request at a time. On 429, wait (`Retry-After` or
@@ -216,15 +221,19 @@ and there are no offenders.
 ## 8. UI
 
 - Runs only on Custom List pages (`/users/<u>/lists/<id>/`, as a path guard at
-  runtime). Rebrickable is server-rendered (no SPA routing), but parts of pages
-  load over AJAX, so the script attaches to elements it waits for.
-- Two buttons: **Consume → `<usedListName>`** and **Return ← `<usedListName>`**.
+  runtime). Rebrickable is server-rendered (no SPA routing).
+- A fixed bottom-right bar, independent of the page's markup, holds three
+  buttons:
+  - **Consume → `<usedListName>`**
+  - **Return ← `<usedListName>`**
+  - **⚙** (settings)
+
   Labels use the configured name.
-- Modal preview with inline `<select>` questions (D11), a confirm button, then
-  the progress log.
-- Settings modal for the §9 config keys.
+- A panel shows the progress log, then the preview with inline `<select>`
+  questions (D11) and a confirm button, then the write log.
+- Settings use native `prompt()` for the two §9 config keys.
 - All injected CSS classes are prefixed `rbps-`. Styles go in via a `<style>`
-  element.
+  element. All text is inserted as text, never HTML.
 
 ---
 

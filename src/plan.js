@@ -163,3 +163,17 @@ export function diffParts(expected, actual) {
   }
   return diffs;
 }
+
+/**
+ * §5.2: why an import response must stop the run, or null when it is clean.
+ *
+ * @param {{status?: string, msg?: string, html?: string}} response
+ * @returns {string|null}
+ */
+export function importProblem(response) {
+  const html = response?.html ?? '';
+  if (response?.status !== 'success') return `import failed: ${response?.msg ?? ''} ${html}`.trim();
+  if (!html.includes('Fix Molds = False')) return `import did not confirm "Fix Molds = False": ${html}`;
+  if (html.includes('CHANGED during import')) return `server changed part ids: ${html}`;
+  return null;
+}

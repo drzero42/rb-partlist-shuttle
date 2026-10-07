@@ -64,3 +64,22 @@ export function parseParts(text) {
 export function serializeParts(rows) {
   return `${PARTS_HEADER}\n${rows.map((r) => `${r.part},${r.color},${r.qty}\n`).join('')}`;
 }
+
+/**
+ * The public catalogue dumps (spec §4.4) → plain objects, so they can be cached
+ * in GM storage as JSON.
+ *
+ * @param {string} partsCsv `parts.csv`
+ * @param {string} categoriesCsv `part_categories.csv`
+ * @returns {{categoryOf: Record<string, string>, categoryName: Record<string, string>}}
+ */
+export function parseCatalogue(partsCsv, categoriesCsv) {
+  const [partsHeader, ...parts] = parseCsv(partsCsv);
+  const [categoriesHeader, ...categories] = parseCsv(categoriesCsv);
+  if (partsHeader?.[0] !== 'part_num' || partsHeader[2] !== 'part_cat_id') throw new Error('unexpected parts.csv header');
+  if (categoriesHeader?.join(',') !== 'id,name') throw new Error('unexpected part_categories.csv header');
+  return {
+    categoryOf: Object.fromEntries(parts.map((row) => [row[0], row[2]])),
+    categoryName: Object.fromEntries(categories),
+  };
+}
