@@ -77,9 +77,11 @@ async function run(direction, { username, listId }) {
 async function apply(ui, username, writes, contents, nameOf, usedId) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   for (const id of new Set(writes.map((w) => w.listId))) {
-    downloadText(`rbps-${nameOf(id)}-${id}-${stamp}.csv`, serializeParts(contents.get(id)));
+    const filename = `rbps-${nameOf(id)}-${id}-${stamp}.csv`;
+    downloadText(filename, serializeParts(contents.get(id)));
+    ui.log(`Backup saved to your download folder: ${filename}`);
   }
-  ui.log('Backups downloaded. Writing…');
+  ui.log('Writing…');
   const token = await csrfToken(username, usedId);
   for (const [i, w] of writes.entries()) {
     const what = `${w.action === 'S' ? 'Subtract from' : 'Append to'} ${nameOf(w.listId)}`;
@@ -97,12 +99,13 @@ async function apply(ui, username, writes, contents, nameOf, usedId) {
       const pending = writes.slice(i + 1).map((p) => `${p.action === 'S' ? 'Subtract from' : 'Append to'} ${nameOf(p.listId)}`);
       ui.fail(
         `${what} stopped: ${error.message}\n\nNot done: ${[what, ...pending].join('; ')}\n` +
-          'Restore from the downloaded backups (Import → Replace), or finish by hand.',
+          `To undo, restore from the backups in your download folder (rbps-…-${stamp}.csv) ` +
+          'with Import → Replace on each list, or finish by hand.',
       );
       return;
     }
   }
-  ui.ok('All writes done and verified.');
+  ui.ok(`All writes done and verified. Backups are in your download folder (rbps-…-${stamp}.csv).`);
 }
 
 function settings() {

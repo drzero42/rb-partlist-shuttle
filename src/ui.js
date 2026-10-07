@@ -124,9 +124,19 @@ export function openPanel(title) {
             );
           }
           const done = (result) => (body.replaceChildren(), resolve(result));
+          if (current.ready) {
+            const changing = [...new Set(current.writes.map((w) => w.listId))].map(nameOf).join(', ');
+            parts.push(
+              el('p', {}, [
+                el('strong', {}, 'Backups: '),
+                `confirming first downloads a CSV backup of each list that will change (${changing}) ` +
+                  "to your browser's download folder. To undo, open a list and use Import → Replace with its backup.",
+              ]),
+            );
+          }
           parts.push(
             el('p', {}, [
-              current.ready ? button('Confirm and write', () => done(current), 'fa-check') : '',
+              current.ready ? button('Back up and write', () => done(current), 'fa-check') : '',
               ' ',
               button('Cancel', () => done(null)),
             ]),

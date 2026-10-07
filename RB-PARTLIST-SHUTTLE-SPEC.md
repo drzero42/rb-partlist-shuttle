@@ -204,6 +204,12 @@ Confirm is absent until every question is answered and there are no offenders.
    (from the reads used for the plan) as a download, using a Blob and
    `<a download>`, into the browser's download folder (subfolders aren't
    possible). Name: `rbps-<list name>-<list id>-<UTC timestamp>.csv`. The
+   user is told at each step:
+   - the preview names the lists that will be backed up and where to, next to a
+     **Back up and write** button;
+   - the log names each saved file;
+   - the final or stop message says where the backups are and how to restore
+     them (Import → Replace). The
    browser gives no failure signal for these downloads, so the contents also
    stay in the panel's preview tables.
 2. **Order:** all subtracts first, then all appends. A subtract on stale data
