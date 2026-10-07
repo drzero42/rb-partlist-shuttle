@@ -34,10 +34,11 @@ spec wins — update this file to match, never the other way.
 - **Sequential requests only**, 429 → backoff (D15). Never parallel writes.
 - **Backup before write, dry-run preview before apply, explicit confirm**
   (D16). Surface server warnings verbatim.
-- **No password, ever.** Session-cookie reads/writes; at most a read-only
-  public catalog API key for category lookups (spec §10).
+- **No password, no API key, ever.** Session-cookie reads/writes only —
+  the catalog key that once justified itself via category lookups is gone with
+  the §4.4 retraction (spec §10).
 - **No state outside Rebrickable** except `GM_*` config keys (spec §9).
-  Category→box maps and provenance are re-derived every run.
+  Routing candidates and provenance are re-derived every run.
 
 ## Architecture
 
@@ -48,10 +49,9 @@ src/
   index.js        entry: page guard (Custom List pages only), settings load, wiring
   csv.js          rbpartscsv parse/serialize            ┐ pure: no network,
   reconcile.js    classify/partition/feasibility/abort,  │ no DOM, no GM_*:
-                  category→box routing                   ┘ unit-testable as-is
+                  box-contents return routing (§6.2)     ┘ unit-testable as-is
   rb-read.js      session GETs: lists, partlists, ?format=rbpartscsv
   rb-write.js     POST importparts/slow/ (A/S), csrf from DOM, response parse, backoff
-  rb-category.js  v3 /lego/parts/ batch + DOM-scrape fallback
   safety.js       auto-backup, resumable journal, post-write verify
   ui.js           injected buttons, preview/ambiguity modals, progress log
   gm.js           the ONLY module allowed to touch GM_* APIs
@@ -111,7 +111,7 @@ dependencies (they'd all be inlined into the userscript).
 ## Conventions
 
 - Match spec vocabulary exactly in code: box, staging, box list, consume,
-  return, `stagingName`, `ignoreLists`, `categoryMode`, `defaultDryRun`.
+  return, `stagingName`, `boxNamePattern`, `ignoreLists`, `defaultDryRun`.
 - Config keys and defaults are frozen in spec §9 — don't invent new ones
   without a spec update.
 - Commit style: short imperative ("Add csv parser", "Fix abort on empty box").
@@ -132,7 +132,7 @@ verified green on a real runner via `workflow_dispatch`.
 0.5 DECLARED, **0.1 FAIL**, and 0.3 came with a warning. Follow-ups: **0.3b
 explained** (composite-id collapse, §12.3 item 5) and **0.1b FAIL** (2026-10-07:
 no keyless part→category source exists; categories are keyed-v3-only). §12.3 lists
-what all that changed — read it before touching `rb-category.js` or the apply loop.
+what all that changed — read it before touching the apply loop.
 
 Confirmed by measurement, so the stubs are no longer guesses:
 - `rb-read.js`/`rb-write.js` response shapes are as now-documented in §5.2/§5.3
@@ -144,19 +144,17 @@ Confirmed by measurement, so the stubs are no longer guesses:
   verdict (§12.3 item 5).
 
 Needs rework before implementation:
-- `rb-category.js` is probably **deleted**: the user decided Return must not need an
-  API key, and 0.1b settled that category data is only reachable with one
-  (§12.3 item 6). Candidate replacement for §6.2 routing is box-contents based
-  (exact → same part any colour → mold-family prefix → prompt), which would also
-  drop `categoryMode`/`apiKey` from §9. The routing mechanism choice is the user's
-  (§12.3 item 6: ladder / keyed D8 / defer Return); do not implement either one
-  until that lands.
+- **The routing mechanism is settled (2026-10-07, user chose the contents ladder):**
+  §6.2 routes on live box reads — exact `(Part,Color)` → same part any colour →
+  mold-family design root → prompt; composites only tier 1; ties and boxed-out rows
+  ask, nothing remembered between runs. `rb-category.js` is deleted,
+  `categoryMode`/`apiKey` are gone from §9 (§12.3 items 6–7). Implement `routeReturnRow`
+  + `planReturn` against that text.
 - `safety.js`: §7.5 verification is now id-level and mandatory.
 
 Next up per spec:
-1. User picks the Return routing mechanism (ladder / keyed D8 / defer — §12.3
-   item 6); then rewrite §6.2/§9/§10/§4.4 to match, item 7 included only if a
-   memory-based hint is chosen.
-2. `csv.js` + `reconcile.js` with tests (fixture CSVs already in
-   `test/fixtures/`), then I/O layers, then UI — replacing the stubs module by
-   module and loosening the export-surface test as each contract settles.
+1. `csv.js` + `reconcile.js` with tests (fixture CSVs already in
+   `test/fixtures/`) — parse/serialize, classify/partition/feasibility, the §6.2
+   ladder, composite⇄component expansion (§12.3 item 5) — then I/O layers, then UI,
+   replacing the stubs module by module and loosening the export-surface test as
+   each contract settles.

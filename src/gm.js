@@ -4,8 +4,8 @@
  * rest of the code runnable under Vitest without a userscript manager.
  *
  * Config keys and defaults are FROZEN by spec §9 — do not add keys without a
- * spec update. No password is ever stored (§10); `apiKey` is a read-only public
- * catalog key used only for return-direction category reads (§4.4).
+ * spec update. No password and no API key is ever stored (§10): the category
+ * lookup that once justified a key was retracted with §4.4 (2026-10-07).
  *
  * `GM_download` is the §7.3 backup sink. Where a manager lacks it, `download()`
  * falls back to a blob + programmatic anchor click (§16.2 note) — and the
@@ -34,8 +34,6 @@ export const MANAGER_API = Object.freeze({
  *                                    single source of that name (§16.1)
  * @property {string} boxNamePattern  regex SOURCE for lists that count as boxes (D6)
  * @property {string[]} ignoreLists   names excluded after the pattern matched (D7)
- * @property {'api'|'dom'} categoryMode category source for the return direction (§4.4)
- * @property {string} apiKey          public catalog key; empty ⇒ `dom` mode is forced
  * @property {boolean} defaultDryRun  always preview before writing (§7.1)
  */
 
@@ -43,8 +41,6 @@ export const CONFIG_DEFAULTS = Object.freeze({
   stagingName: 'Used for MOCs',
   boxNamePattern: '\\bbox(?:es)?\\b',
   ignoreLists: Object.freeze([]),
-  categoryMode: 'api',
-  apiKey: '',
   defaultDryRun: true,
 });
 

@@ -49,12 +49,12 @@ Non-goals (explicitly out of scope):
 | D5 | Staging identity | `Used for MOCs` Part List identified by **exact configured name** (default `Used for MOCs`). NOT by build-type flag (avoids breaking the user's Assembled/Custom-List semantics and avoids guessing if multiple lists share a flag). |
 | D6 | Box identity | **Fail-closed.** A Part List is a candidate **box** only if its name matches `boxNamePattern` AND it is not the staging list AND it is not on `ignoreLists`. A list the tool cannot recognise as a box is never treated as stock on hand — that is what keeps pending-order lists and wishlists from satisfying a consume plan. Still **flag-agnostic**: build-type flags stay the user's business (§4.3). |
 | D7 | Ignore-list | Name-based exclusion applied **after** `boxNamePattern`, for lists that match the pattern but must not be drawn from (e.g. a future `Boxes — order 4513`). Out-of-scope lists are named in the preview (§8) so a wrong pattern never silently shrinks inventory. |
-| D8 | Category→box map | **Derived live, never hardcoded**, re-built each run from current box contents + resolved categories. Self-updates when a category is re-shelved to a different box type. |
+| D8 | Return routing signal | **Live box contents** (§6.2 ladder), re-read every run — nothing cached, nothing persisted. (Originally "category→box map, derived live"; superseded 2026-10-07: 0.1b proved categories need the keyed v3 API, and the user rejected persisted hints. The storage invariant in §3 is what makes contents stand in for categories.) |
 | D9 | Molds | **`fix_molds` OFF (literal)** on every write. The tool must not rewrite part numbers (e.g. must NOT turn `48729b`→`3484`). |
 | D10 | Variant matching | **Exact `Part,Color` match only.** No mold/print/alternate fallback. A real variant mismatch surfaces as "missing → abort" (see D11) so the user resolves it, not the tool. |
 | D11 | Consume shortfall | **All-or-nothing abort.** If ANY requested `(Part,Color)` qty exceeds what its home box holds, the run makes **zero** writes and reports the offenders. Used for MOCs must end up exactly equal to the MOC list's available subset (no silent partials). |
 | D12 | Consume source pool | Consume pulls **only from boxes**, never from `Used for MOCs`. (A part sitting in staging belongs to another MOC.) |
-| D13 | Return routing | Live **category inference** → home box by part's category. Ambiguous (0 or ≥2 candidate boxes) → in-page modal **asks** which Part List to use. |
+| D13 | Return routing | **Contents ladder** (§6.2): exact `(Part,Color)` → same `Part` any colour → same design root, different mould letter. Exactly one candidate box → route there; 0 (family boxed-out) or ≥2 (tied) → in-page modal **asks** which Part List to use. Never guesses; remembers nothing between runs. |
 | D14 | Trigger UX | A button injected on the Rebrickable **Custom List** page: "Move → Used for MOCs" / "Move ← Used for MOCs". |
 | D15 | Throttle | Rebrickable v3 API is ~1 req/sec (429 → backoff). Import/export site endpoints are user-session, not API-throttled, but requests stay **sequential**. |
 | D16 | Safety | Auto CSV backup of every affected list before any write; dry-run/preview; explicit confirm; resumable. |
@@ -67,16 +67,19 @@ Non-goals (explicitly out of scope):
   category lives in **exactly one box type** (invariant). A box may hold multiple
   categories. Within a box, bricks are bagged by part number.
 - **Staging** = the single Part List named (by config) `Used for MOCs`. Holds
-  bricks currently pulled for assembled/in-progress MOCs. It is **not** a category
-  home and must be **excluded** from the category→box map.
+  bricks currently pulled for assembled/in-progress MOCs. It is **not** a box and
+  must be **excluded** from return-routing candidates (and from consume's pool, D12).
 - **Custom List** = the MOC's `(Part,Color,Qty)` — the unit of work for a
   consume/return run.
-- **Category** = Rebrickable `part_cat_id` / `part_cat_name`. Used only for
-  return-direction routing.
+- **Category** = Rebrickable `part_cat_id` / `part_cat_name`. Reachable only
+  behind the keyed v3 API (0.1/0.1b) and therefore **unused by the tool**; the
+  invariant it encoded is exploited through live box contents instead (§6.2).
 
 Storage invariant (user-stated): one category → one box type; a part+color lives
 in at most one box; it can additionally be split between a box and staging
-(some committed, some still boxed).
+(some committed, some still boxed). Since categories are unreachable keylessly,
+return routing leans on this invariant *via the part's own identity*: the box
+currently holding the part (or its colour/mould family) is its home (§6.2).
 
 ---
 
@@ -93,49 +96,39 @@ GET https://rebrickable.com/users/<username>/lists/<list_id>/parts/?format=rbpar
   numeric color ids (e.g. `48729b,0,2`; color `0` = Black).
 - `?_=<ts>` cache-buster is optional; `inc_spares` optional (see Task 0.5).
 
-### 4.2 Box contents (source lookup + category map)
+### 4.2 Box contents (source lookup + return routing)
 ```
 GET https://rebrickable.com/users/<username>/partlists/<list_id>/parts/?format=rbpartscsv&inc_spares=0
 ```
 - Same format, for every candidate box list.
 
 ### 4.3 List discovery + staging classification
-```
-GET https://rebrickable.com/api/v3/users/<user_token>/partlists/?key=<api_key>
-```
-Returns each list's `list_id`, `descr`, `type` (1=used-in-build, 2=not-used),
-`qty`. The tool uses this ONLY to enumerate Part Lists + ids. Classification is by
-**name** — `boxNamePattern` for boxes, exact `stagingName` for staging, then
-`ignoreLists` — never by `type` (per D5/D6/D7).
-- Alternative (no v3 key): scrape `MY LEGO → My Part Lists` sidebar for links +
-  names.
+**Primary (keyless, session):** scrape the `MY LEGO → My Part Lists` sidebar for
+list links + names (the 0.6/Task-0 runs confirmed 15 lists, ids + names).
+The documented v3 alternative
+`GET /api/v3/users/<user_token>/partlists/?key=<api_key>`
+returns `list_id`, `descr`, `type`, `qty` — but it is a **private** endpoint whose
+user token comes from username+password, which §10 forbids, so the tool does not
+use it (it only matters to the §13 fallback path).
+Classification is by **name** either way — `boxNamePattern` for boxes, exact
+`stagingName` for staging, then `ignoreLists` — never by `type` (D5/D6/D7).
 
-### 4.4 Category resolution (return direction only)
-```
-GET https://rebrickable.com/api/v3/lego/parts/?part_nums=<a>,<b>,<c>&inc_part_details=1&key=<api_key>
-```
-**Measured on the real account (Task 0.1, 2026-10-06) — this fails the original
-pass criterion.** HTTP 200, 2/2 parts back, and each item carries `part_num` +
-`part_cat_id` (`3001`→11, `48729b`→32) but **no `part_cat_name`**, even with
-`inc_part_details=1`. Category **ids** are available; names are not.
+### 4.4 Category resolution — **RETRACTED** (was return-direction only)
+**Withdrawn 2026-10-07** (user chose the contents-ladder mechanism, §6.2/D8;
+Task 0.1 and 0.1b are the evidence, §12.2): `part_cat_id` is reachable only via
+the keyed v3 API, `part_cat_name` never comes back even keyed with
+`inc_part_details=1`, no internal endpoint or page data leaks categories
+keylessly, and the user requires Return to work with no key and no persisted
+hints. There is no category resolution step in the product; routing reads live
+box contents only.
 
-- **The keyless fallback this section assumed does not exist.** `data-part_cat_id`
-  / `data-part_cat_name` occurred **0 times** on the rendered Part-List page and
-  **0 times** in the import response `html` — the part rows are drawn client-side,
-  so scraping the DOM yields nothing. Any future fallback must target the
-  client-side data source, not the static HTML.
-- **Adopted design:** route on `part_cat_id` alone (the storage invariant is one
-  box per *category*, and ids are stable and comparable), and fetch names with a
-  **single** `GET /api/v3/lego/part_categories/?key=<api_key>` cached for the run —
-  names are only ever needed for the display text of the §6.2 ambiguity prompt.
-- Public catalog endpoint → needs the **API key** (free), NOT a user token, NOT the
-  password. Still ~1 req/sec; batch via `part_nums`, page with `page_size` up to
-  1000.
-- **Consequence:** `categoryMode: dom` is not implementable, and per the user's
-  decision (2026-10-06) the return direction must **not** require an API key — so
-  category-based routing is the wrong mechanism entirely. **0.1b (2026-10-07)**
-  confirmed there is no keyless source with which to revisit that: category data
-  exists only behind the keyed v3 API. See §12.3 item 6.
+Kept facts in case any future version revisits this:
+- `GET /api/v3/lego/parts/?part_nums=<a>,<b>,<c>&inc_part_details=1&key=<api_key>`
+  (HTTP 200) returns `part_cat_id` per item but **no `part_cat_name`**;
+  `GET /api/v3/lego/part_categories/?key=<api_key>` maps id→name. Batch via
+  `part_nums`, `page_size` ≤ 1000, ~1 req/s (D15).
+- The public catalog endpoint needs the free **API key**, NOT a user token, NOT
+  the password.
 
 ---
 
@@ -212,32 +205,47 @@ Input: Custom List `(Part,Color,Qty)` rows. Steps:
    b. For staging: `Append` the consumed CSV (`action=A`).
 7. Refresh/verify counts; write-back check (7.x).
 
-Note: consume does NOT require categories at all (exact content-match). So consume
-works with session cookies only (no API key, minimal throttle exposure).
+Note: consume does NOT require categories at all (exact content-match) — and with
+§4.4 retracted, neither does return. Both directions work with session cookies
+only (no API key, minimal throttle exposure).
 
 ### 6.2 Return — Used for MOCs → boxes
-Input: the same Custom List rows (what this MOC consumed). Steps:
+Input: the same Custom List rows (what this MOC consumed). The routing signal is
+**live box contents**, re-read every run — no categories (§4.4 retracted), no
+persisted hints (§12.3 items 6/7). The storage invariant (§3) is what makes "the
+box that currently holds parts like this" answer the question the category map
+was supposed to answer. Steps:
 1. Classify lists as above.
 2. Read staging contents (for availability check) + all box contents.
-3. Resolve `category → box` **live**: for each part+color in each **box**, get its
-   category (via 4.4). A category's home box = the box containing parts of that
-   category. (If a category appears in ≥2 boxes → ambiguous; if a category appears
-   in 0 boxes — fully consumed — cannot infer.)
-4. For each MOC row to return: home box = box owning that part's category.
-   - clean single box → route there;
-   - 0 or ≥2 candidate boxes → **modal ask** (D13).
+3. For each MOC row to return, find candidate boxes by the **ladder**, stopping at
+   the first tier that yields any candidate:
+   1. exact `(Part,Color)` present in a box;
+   2. same `Part`, any colour, present in a box (absorbs server-side id rewrites
+      like `4592,1` → `4593,0`);
+   3. same design root with a different mould letter (`48729b` ⇄ `48729a`) present
+      in a box — reported in the preview as a mould-family match.
+   Composite ids (`<design>c<num>`, §12.3 item 5) match only in tier 1; the
+   preview shows the component⇄composite equivalence and lets the user resolve —
+   D10 still governs **writes** (never invent or substitute an id).
+4. Exactly one candidate box → route there. Zero (the whole family is boxed-out)
+   or ≥2 (tied across boxes) → **modal ask** (D13): the user picks the destination
+   Part List for that row. Nothing is remembered between runs — the same
+   boxed-out row asks again next time; that is the accepted price of statelessness.
 5. Pre-validate staging holds ≥ requested qty per `(Part,Color)`; if not,
    **abort** (mirror of D11).
-6. Preview + confirm.
+6. Preview — per-box grouping, and **how each row was routed** (exact / any-colour
+   / mould-family / asked) — then confirm.
 7. Apply:
    a. For each destination box: `Append` its subset (`action=A`).
    b. For staging: `Subtract` the returned CSV (`action=S`).
 
-### 6.3 Empty-category caveat (honest limitation)
-Because state is never persisted, if an entire category currently lives only in
-staging (no box holds any part of it), return cannot infer that category's home
-box → it must ask. This is the accepted price of "derive live, store nothing"
-(the user chose it) and should be surfaced clearly, not guessed.
+### 6.3 Boxed-out caveat (honest limitation)
+Because state is never persisted, a row whose exact `(Part,Color)`, same-part-any-
+colour and mould family are all absent from every box has **no candidate** —
+return cannot infer its home and must ask (§6.2 step 4). This replaces the old
+empty-category caveat and is the accepted price of "derive live, store nothing"
+(the user chose it, again on 2026-10-07) and should be surfaced clearly, not
+guessed.
 
 ---
 
@@ -272,8 +280,8 @@ box → it must ask. This is the accepted price of "derive live, store nothing"
 - Inject a toolbar button on **Custom List** pages (`/users/<u>/lists/<id>/`):
   - "🧱 → Used for MOCs (consume)"
   - "🧱 ← Used for MOCs (return)"
-- Small settings panel (persisted via `GM_setValue`) for: staging name, box
-  ignore-list, default `dry-run`, and API-key presence toggle for category mode.
+- Small settings panel (persisted via `GM_setValue`) for exactly the §9 keys:
+  staging name, box name pattern, box ignore-list, default `dry-run`.
 - Preview + ambiguity modals (in-page, `GM_addStyle`) with a `<select>` of
   candidate Part Lists; optional "remember for this run" (session-scoped only).
 - Progress log for the sequential apply.
@@ -287,11 +295,11 @@ box → it must ask. This is the accepted price of "derive live, store nothing"
 | `stagingName` | `Used for MOCs` | exact-match staging list name — **the single source of that name** (§16.1) |
 | `boxNamePattern` | `\bbox(?:es)?\b` | regex SOURCE (compiled `i`) for the lists that count as boxes; fail-closed (D6). `?` must sit on the `(es)`, not on the `s`: `\bboxes?\b` matches "boxes" but not "box" |
 | `ignoreLists` | `[]` | names excluded AFTER `boxNamePattern` matched (D7) |
-| `categoryMode` | `api` (else `dom`) | category source for return |
-| `apiKey` | (empty) | public catalog key for category batch (return only) |
 | `defaultDryRun` | `true` | always preview |
 
-No username/password stored. API key only for return-direction category reads.
+No username/password stored, and **no API key** — the category lookup that once
+justified `apiKey`/`categoryMode` is retracted (§4.4); both keys were removed
+2026-10-07.
 `boxNamePattern` is stored as a **string** because GM storage is JSON; code compiles
 it with the `i` flag and must fail loudly on an invalid pattern rather than fall
 back to matching everything.
@@ -315,9 +323,11 @@ Account facts (2026-10-06, from the user's 15 Part Lists):
 
 - Runs same-origin with the user's own session; performs operations the user can
   already do manually via Import — automated, not elevated.
-- Credentials: at most a **read-only public catalog API key** (return only). Never
-  the login password. CSRF token is read from the page, not extracted from an
-  HttpOnly cookie.
+- Credentials: **none**. Session cookies ride the browser's own login; the
+  read-only public catalog API key that the old category lookup (§4.4) wanted is
+  gone — 0.1b proved categories need it, and the user requires a keyless tool.
+  Never the login password. CSRF token is read from the page, not extracted from
+  an HttpOnly cookie.
 - Flag fragility: internal import/export URLs are undocumented; on breakage, fall
   back to the official v3 API write path (documented, slower, needs user token —
   see 13).
@@ -327,17 +337,18 @@ Account facts (2026-10-06, from the user's 15 Part Lists):
 ## 11. Architecture (suggested modules)
 
 - `reconcile.js` — pure functions: partition MOC rows by box; feasibility/abort;
-  category→box; unit-testable with fixture CSVs (no network).
+  return-routing ladder (§6.2); unit-testable with fixture CSVs (no network).
 - `rb-read.js` — session export fetch (`lists` + `partlists` `?format=rbpartscsv`),
   list enumeration.
 - `rb-write.js` — `importparts/slow/` POST builder (FormData), csrf handling,
   response parse, backoff.
-- `rb-category.js` — category resolution: API batch (`/lego/parts/`) with DOM fallback.
 - `ui.js` — button injection, preview/ambiguity modals, progress, settings.
 - `safety.js` — backup-before-write, resumable journal (session/local), verify.
 
 Keep `reconcile.js` network-free and fully unit-tested — it holds all the risky
-logic (abort rules, partitioning, category routing).
+logic (abort rules, partitioning, routing ladder).
+
+(`rb-category.js` was deleted 2026-10-07 with the §4.4 retraction.)
 
 ---
 
@@ -455,12 +466,12 @@ gate, no writes; net-zero re-verified against the same 4 baseline rows.
    composite⇄component equivalence, otherwise it is a failure and the run stops.
 2. **Categories come from ids + one lookup (§4.4).** `part_cat_name` is not in the
    parts response; the DOM scrape has nothing to read. Routing uses `part_cat_id`,
-   names use a single cached `/api/v3/lego/part_categories/` call.
-3. **`categoryMode` / `apiKey` are open decisions (§9).** `dom` mode cannot be built
-   as specified, so either (a) the return direction requires a key and the key is no
-   longer optional, or (b) return is dropped from the MVP and consume ships keyless
-   (§15.1 already works without a key). (b) keeps §10's "at most a read-only key"
-   promise weakest — recommended.
+   names use a single cached `/api/v3/lego/part_categories/` call. — **moot for the
+   product** since the §4.4 retraction (2026-10-07); kept as the measurement record.
+3. **`categoryMode` / `apiKey`: RESOLVED — deleted (§9).** Neither the keyed path
+   nor deferring Return won: 0.1b removed categories from the design, and the
+   contents ladder (item 6) answers Return keylessly. Both keys were deleted from
+   the §9 table and §10 on 2026-10-07.
 4. **Budget for slow writes (§8).** ~10-14s per 300-row import means the progress log
    must show which box is in flight; nothing about the plan changes.
 5. **Resolved: the server collapses component pairs into composite ids (0.3b).**
@@ -479,36 +490,27 @@ gate, no writes; net-zero re-verified against the same 4 baseline rows.
    - 0.3 now records `sourceList` — the original warning could not be traced to the
      box rows I assumed it came from.
 
-6. **Return must work without an API key (user decision, 2026-10-06), which kills
-   category routing as the mechanism.** §4.4's inputs are unavailable keylessly, and
-   the backend rewrites ids regardless. Proposed replacement for §6.2 — route on the
-   **box contents** the tool already reads, in this order:
-   1. exact `(Part,Color)` in a box → that box;
-   2. same `Part`, any colour, in exactly one box → that box (this absorbs rewrites
-      like `4592,1` → `4593,0`);
-   3. same 5-digit design id with a different mold letter (`48729b` ⇄ `48729a`) in
-      exactly one box → that box, reported as a mold-family match;
-   4. otherwise the §6.3 prompt, now the normal fallback rather than the exception.
-   Ties across boxes still prompt. This deletes `categoryMode` and `apiKey` from §9,
-   removes the last credential-ish surface from §10, and makes §4.4 unnecessary — at
-   the cost of D8's storage-invariant framing, which becomes an optimisation instead
-   of the mechanism. **Awaiting approval before §6.2/§9/§10/§4.4 are rewritten.**
-   Item 6's premise was tested by **0.1b** (2026-10-07, §12.2) and failed: no
-   keyless part→category source exists anywhere session-side. Category routing (D8)
-   therefore survives only with a read-only catalog key; keylessly, the contents
-   ladder above is the only mechanism. The remaining decision is the user's:
-   (a) approve the ladder + prompt rewrite of §6.2/§9/§10/§4.4; (b) accept a
-   read-only key for Return and keep D8; (c) ship Consume and defer Return (item 3b).
-   **No routing code lands before that choice.**
+6. **Return must work without an API key (user decision, 2026-10-06), so category
+   routing is dead as the mechanism.** §4.4's inputs are unavailable keylessly —
+   0.1 + 0.1b (§12.2) settled it: `part_cat_id` lives only behind the keyed v3
+   API, the internal JSON probes return HTML or 404, and no page data embeds
+   categories — and the backend rewrites ids regardless. The three-way choice was
+   put to the user on 2026-10-07: (a) contents ladder, (b) accept a read-only key
+   and keep D8, (c) ship Consume and defer Return. **The user chose (a).** The
+   ladder (exact `(Part,Color)` → same `Part` any colour → same design root with
+   a different mould letter → prompt; composite ids match only exactly; ties
+   across boxes prompt) is now the text of §6.2/D13, and §2, §3, §4.2–§4.4, §6.3,
+   §8, §9, §10, §11, §14, §15 and §16 were rewritten to match the same day;
+   `rb-category.js` was deleted. (b)/(c) stay off the table unless the §6.3 prompt
+   volume proves unbearable in real use — the escape hatch then is revisiting the
+   evidence, not reintroducing memory.
 
-7. **Routing memory needs a flush story before §9 gains a key.** Whatever mechanism
-   wins, anything remembered in GM storage must be *invalidate-on-read*, not
-   time-expired: each run already re-reads every box's contents (§7.2), so a stored
-   hint is dropped the moment a box actually contains the part again, and the
-   settings panel (§8) gets an explicit "clear routing memory". No TTL — a silent
-   expiry would change behaviour between two runs of the same file, which is worse
-   than a stale hint the user can clear. Adding a §9 key for this is blocked on the
-   item 6 decision.
+7. **Routing memory — WITHDRAWN (2026-10-07).** The user rejected persisting
+   anything about where bricks came from, so no GM routing-memory key is added and
+   §9 is unchanged beyond the deletions in item 6. Modal answers live only inside
+   the current run (§8's session-scoped "remember for this run"); a boxed-out row
+   asks again on the next run, by design (§6.3). The invalidate-on-read/flush
+   design drafted here is moot while that holds.
 
 ---
 
@@ -536,19 +538,23 @@ Keep behind a config flag. Primary stays the session Import endpoints (D4).
   but not sufficient for D9/D10: mitigation is §7.5's id-level diff, and a "missing"
   verdict may really mean "the box stores this under a merged id". Which part pairs
   merge is catalog data we do not have — see §12.3.
-- Return routing depends on the storage invariant (each category one box). If the
-  invariant is ever violated, the tool asks rather than guesses.
-- If a category is entirely consumed (no box has it), return can't infer the home
-  box → prompts (§6.3).
+- Return routing depends on the storage invariant (§3) *and* on the part's family
+  still being present in some box. A violated invariant shows up as a tie across
+  boxes → the tool asks rather than guesses.
+- If a part's whole mould family is boxed-out (no box holds it in any colour or
+  mould variant), return has no candidate box → prompts (§6.3). Prompts repeat
+  across runs by design: nothing is remembered (§12.3 item 7 withdrawn).
 
 ---
 
 ## 15. Definition of done (MVP)
 
 1. Consume a Custom List into `Used for MOCs`, exact quantities, all-or-nothing,
-   preview + confirm, backup + verify — no API key needed.
-2. Return the same Custom List back to home boxes via live category inference,
-   ambiguity prompts, exact quantities, preview + confirm.
+   preview + confirm, backup + verify.
+2. Return the same Custom List back to home boxes via the live contents ladder
+   (§6.2) — ask-prompts for ties and boxed-out rows (§6.3) — exact quantities,
+   preview + confirm. Both directions: session cookies only, no API key, no
+   stored state.
 3. `fix_molds` provably OFF (0.2 **passed**, with the server's own
    `Fix Molds = False` echo asserted per write) **and** post-write id-level
    verification proving no id was rewritten in practice (0.3 **warned** — see §7.5).
@@ -640,14 +646,14 @@ Notes:
   separate `@updateURL` key (that spelling is Tampermonkey's).
 - `GM_download` is required by §7.3 (auto-backup). If a target manager lacks it,
   fall back to a blob + programmatic anchor click and drop the grant.
-- `GM_getValue`/`GM_setValue` back the §9 config keys. No password is ever
-  stored (§10); `apiKey` is a read-only public catalog key.
+- `GM_getValue`/`GM_setValue` back the §9 config keys. No password and no API key
+  is ever stored (§10; the category-lookup key died with §4.4's retraction).
 
 ### 16.3 Module filenames
 
 §11's module names are unchanged and stand on their own — no `shuttle` prefix
-needed inside the repo: `reconcile.js`, `rb-read.js`, `rb-write.js`,
-`rb-category.js`, `ui.js`, `safety.js`.
+needed inside the repo: `reconcile.js`, `rb-read.js`, `rb-write.js`, `ui.js`,
+`safety.js` (`rb-category.js` was deleted 2026-10-07 with §4.4).
 
 ### 16.4 Distribution
 

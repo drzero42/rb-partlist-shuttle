@@ -75,7 +75,8 @@ export function renderAmbiguityModal(opts) {
 
 /**
  * Settings panel for the frozen §9 keys. No password field may ever be added
- * (§10); `apiKey` is labelled as a read-only public catalog key.
+ * (§10); there is no API-key field any more either — the category lookup that
+ * needed it was retracted (§4.4, 2026-10-07).
  *
  * @param {{config: import('./gm.js').ShuttleConfig, onSave: (patch: Partial<import('./gm.js').ShuttleConfig>) => void, onClose: () => void}} opts
  * @returns {{close: () => void}}

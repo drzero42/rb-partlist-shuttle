@@ -15,7 +15,6 @@ const MODULES = [
   'reconcile.js',
   'rb-read.js',
   'rb-write.js',
-  'rb-category.js',
   'safety.js',
   'ui.js',
   'gm.js',
@@ -26,7 +25,7 @@ const SURFACE = {
   'csv.js': ['CSV_HEADER', 'rowKey', 'parseRbPartsCsv', 'serializeRbPartsCsv', 'indexRows'],
   'reconcile.js': [
     'classifyLists',
-    'buildCategoryBoxMap',
+    'routeReturnRow',
     'planConsume',
     'planReturn',
     'detectReapply',
@@ -52,14 +51,6 @@ const SURFACE = {
     'buildImportForm',
     'parseImportResponse',
     'importParts',
-  ],
-  'rb-category.js': [
-    'API_BATCH_SIZE',
-    'API_PAGE_SIZE',
-    'fetchCategoriesByApi',
-    'scrapeCategoriesFromListPage',
-    'parseCategoryDataFromHtml',
-    'resolveCategories',
   ],
   'safety.js': [
     'backupFilename',
@@ -255,7 +246,12 @@ describe('frozen spec constants', () => {
   it('§9 config keys and defaults match the spec table', async () => {
     const gm = await import('../src/gm.js');
     const expected = specConfigDefaults();
-    expect(Object.keys(expected).length).toBeGreaterThan(4);
+    expect(Object.keys(expected).sort()).toEqual([
+      'boxNamePattern',
+      'defaultDryRun',
+      'ignoreLists',
+      'stagingName',
+    ]);
     expect({ ...gm.CONFIG_DEFAULTS }).toEqual(expected);
     expect(gm.configKeys().sort()).toEqual(Object.keys(gm.CONFIG_DEFAULTS).sort());
   });

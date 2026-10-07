@@ -61,10 +61,11 @@ export async function fetchPartListRows(target) {
 }
 
 /**
- * Enumerate the user's Part Lists (§4.3). The `type` build flag is carried
- * through untouched but must never drive classification (D5/D6).
+ * Enumerate the user's Part Lists (§4.3, session-only DOM scrape). The `type`
+ * build flag is carried through untouched but must never drive classification
+ * (D5/D6). The v3 endpoint is not used: its user token needs a password (§10).
  *
- * @param {{username: string, apiKey?: string}} opts  apiKey empty ⇒ DOM scrape
+ * @param {{username: string}} opts
  * @returns {Promise<RbList[]>}
  */
 export async function fetchPartLists(opts) {
@@ -72,7 +73,8 @@ export async function fetchPartLists(opts) {
 }
 
 /**
- * Keyless §4.3 alternative: scrape `MY LEGO → My Part Lists` for ids + names.
+ * §4.3 primary (and only) enumeration path: scrape `MY LEGO → My Part Lists`
+ * for ids + names.
  *
  * @param {Document|ParentNode} [root] defaults to the live document
  * @returns {RbList[]}

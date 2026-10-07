@@ -9,8 +9,11 @@
  * Rules encoded here:
  *   D5/D6/D7  staging = exact configured name; box = everything not staging and
  *             not ignored; build-type flags are NEVER consulted.
- *   D8        category→box map is derived live from current box contents.
- *   D10       exact `Part,Color` identity only — no variant/mold fallback.
+ *   D8/D13    return routes on live box contents — the §6.2 ladder (exact
+ *             Part,Color → same Part any colour → same design root, different
+ *             mould letter → ask). No categories, no memory (§12.3 items 6/7).
+ *   D10       exact `Part,Color` identity only for WRITES; the ladder tiers are
+ *             routing hints reported in the preview, never id substitutions.
  *   D11       all-or-nothing: any shortfall ⇒ `feasible: false` ⇒ zero writes.
  *   D12       consume pulls only from boxes, never from staging.
  *   D13       ambiguous return routing (0 or ≥2 candidate boxes) ⇒ ask, never guess.
@@ -91,15 +94,18 @@ export function classifyLists(lists, config) {
 }
 
 /**
- * Derive the live category→box map from current box contents (D8). Staging must
- * be excluded by the caller — it is not a category home (spec §3).
+ * The §6.2 routing ladder for one return row, over live box contents — no
+ * categories, no memory. Tier order; stop at the first tier with candidates:
+ *   exact (Part,Color) → same Part any colour → same design root, different
+ *   mould letter (`48729b` ⇄ `48729a`). Composite ids (`<design>c<num>`,
+ *   §12.3 item 5) match only in tier 1. Staging is excluded by the caller.
  *
+ * @param {{partNum: string, color: number|string}} row
  * @param {ListContents[]} boxContents
- * @param {(partNum: string) => {partCatId: number, partCatName: string}|null} categoryOf
- * @returns {{categoryToBoxes: Map<number, (number|string)[]>, ambiguous: {partCatId: number, listIds: (number|string)[]}[], unmappedPartNums: string[]}}
+ * @returns {{tier: 'exact'|'anyColor'|'moldFamily'|'none', listIds: (number|string)[]}}
  */
-export function buildCategoryBoxMap(boxContents, categoryOf) {
-  throw new Error(`NotImplemented: reconcile.buildCategoryBoxMap (${boxContents.length} boxes)`);
+export function routeReturnRow(row, boxContents) {
+  throw new Error(`NotImplemented: reconcile.routeReturnRow (${row.partNum})`);
 }
 
 /**
@@ -108,7 +114,10 @@ export function buildCategoryBoxMap(boxContents, categoryOf) {
  * Each MOC row must be met in full by exactly ONE box (D10, D12). A row held by
  * several boxes is `ambiguous`; a row held by none is `missing`; a row whose box
  * holds too few is an `offender`. Any of the latter two ⇒ `feasible: false` and
- * the caller must make zero writes (D11).
+ * the caller must make zero writes (D11). Before claiming `missing`, the
+ * near-miss report expands composite⇄component ids (§12.3 item 5) — a box
+ * holding `298c02` is not empty of `4592`+`4593`, and it says so in the preview
+ * rather than silently picking an id.
  *
  * @param {{mocRows: import('./csv.js').CsvRow[], boxContents: ListContents[], stagingContents: ListContents|null}} input
  * @returns {ShuttlePlan}
@@ -118,13 +127,13 @@ export function planConsume(input) {
 }
 
 /**
- * Plan return: staging → home boxes (spec §6.2).
+ * Plan return: staging → home boxes (spec §6.2), routing via `routeReturnRow`
+ * on live box contents. Rows with 0 candidates (whole family boxed-out, §6.3)
+ * or ≥2 (invariant tie) go to `ambiguous` for the UI modal (D13); the row's
+ * matched tier is recorded for the preview. Staging must hold the requested
+ * quantity or the row is an `offender` (mirror of D11).
  *
- * Destination is the box owning the part's category. Zero or ≥2 candidate boxes
- * ⇒ the row goes to `ambiguous` for the UI modal (D13), and staging must hold
- * the requested quantity or the row is an `offender` (mirror of D11).
- *
- * @param {{mocRows: import('./csv.js').CsvRow[], stagingContents: ListContents, boxContents: ListContents[], categoryBoxMap: Map<number, (number|string)[]>, categoryOf: (partNum: string) => {partCatId: number, partCatName: string}|null}} input
+ * @param {{mocRows: import('./csv.js').CsvRow[], stagingContents: ListContents, boxContents: ListContents[]}} input
  * @returns {ShuttlePlan}
  */
 export function planReturn(input) {
