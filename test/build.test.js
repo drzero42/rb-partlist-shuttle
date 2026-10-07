@@ -19,7 +19,7 @@ it('renders the spec §12 metadata block', () => {
 });
 
 it('runs only on Custom List pages', () => {
-  expect(matchCustomListPage('/users/drzero/lists/42/')).toEqual({ username: 'drzero', listId: '42' });
-  expect(matchCustomListPage('/users/drzero/partlists/42/')).toBeNull();
-  expect(matchCustomListPage('/users/drzero/lists/42/parts/')).toBeNull();
+  expect(matchCustomListPage('/users/someone/lists/42/')).toEqual({ username: 'someone', listId: '42' });
+  expect(matchCustomListPage('/users/someone/partlists/42/')).toBeNull();
+  expect(matchCustomListPage('/users/someone/lists/42/parts/')).toBeNull();
 });

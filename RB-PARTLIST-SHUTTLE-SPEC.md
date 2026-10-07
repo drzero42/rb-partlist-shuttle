@@ -56,7 +56,7 @@ Non-goals:
 
 ---
 
-## 3. Storage rule (user-stated)
+## 3. Storage rule (what the tool assumes)
 
 - Every Rebrickable part category belongs to **exactly one box type**, which is
   exactly one box list. A box list may hold several categories.
@@ -252,24 +252,21 @@ Only these. Nothing about past moves.
 | `boxNamePattern` | `\bbox(?:es)?\b` | regex source, compiled with `i`, for box lists (D5). An invalid pattern is an error, never "match all". |
 | `catalogCache` | none | public catalogue cache (§4.4). Rebrickable reference data, not user state. |
 
-The default box pattern was checked against the account's 15 lists (2026-10-06):
-
-- **Matches (box lists):** `15l storage boxes`, `Big storage boxes`,
-  `Large condi boxes`, `Medium condi boxes`, `Medium storage boxes`,
-  `Mini storage boxes`, `Small condi boxes`, `Small storage boxes`,
-  `Sorting boxes`.
-- **Doesn't match:** `Bag`, `Ordered from Bricklink`, `Ordered from Lego`,
-  `Unknown placement`, `Used for MOCs`, `Task0 probe`.
+The defaults suit a collection whose box lists are named like `Small storage
+boxes` or `Sorting box`. The default pattern doesn't match names like `Matchbox`,
+`Bag`, `Ordered from …` or `Unknown placement`. Anyone with other naming sets
+both keys in ⚙ settings. Nothing in the code depends on any one account's lists.
 
 ---
 
 ## 10. Verified facts
 
-Measured by the user running a console probe on a scratch list (2026-10-06/07).
-The user is not certain every result was recorded correctly. The implementation
-therefore re-checks each one on its first real use (response assertions in §5.2,
-verify in §7.4), and anything marked *unverified* must be confirmed during
-development.
+Facts about Rebrickable's behaviour that the design relies on. They were
+measured with a console probe on a scratch Part List (2026-10-06/07), or
+observed during development. The probe's recording isn't fully trusted, so the
+implementation re-checks the important ones on every write (response
+assertions in §5.2, verify in §7.4). Anything marked *unverified* must be
+confirmed before release.
 
 | fact | status |
 |------|--------|
@@ -278,10 +275,10 @@ development.
 | CSRF token from a Part List page's hidden input works for repeated writes; cookie is HttpOnly | measured |
 | `rbpartscsv` ids round-trip byte-for-byte through Append/export | measured |
 | Appending `4592,1` + `4593,0` produced one line `298c02,1` with a `CHANGED during import` warning; subtracting the same rows restored the list | measured. Note: `298c0N` encodes the lever colour, so this is not a general colour-preserving equivalence. Handled by stopping (§5.2). |
-| No spare parts in the account, so `inc_spares=0` | declared by user |
+| Reads use `inc_spares=0` | *open*: a list with spare-flagged rows would hide them from the tool. Consume would then report them missing (safe, since nothing is written), and verification stays consistent because every read uses the same flag. Check whether Part List imports ever create spare rows. |
 | Custom List export URL is `/users/<u>/lists/<id>/parts/?format=rbpartscsv&inc_spares=0` (the page's own Export link) | verified 2026-10-07 |
 | Custom List export header is `Part,Color,Quantity` | *unverified* |
-| `/users/<u>/partlists/` index lists all Part Lists as root anchors, text `<name> (<N> parts)` | verified 2026-10-07 (all 15 lists) |
+| `/users/<u>/partlists/` index lists all Part Lists as root anchors, text `<name> (<N> parts)` | verified 2026-10-07 |
 | A Custom List page carries a usable `csrfmiddlewaretoken`; else fetch one from a Part List page | *unverified* |
 | Catalogue CDN: no CORS header, `ETag`/`Last-Modified`, 304 on conditional GET | verified 2026-10-07 |
 
