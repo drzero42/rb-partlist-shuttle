@@ -1,5 +1,5 @@
 /**
- * Release the built userscript (spec §16.4).
+ * Release the built userscript (spec §13).
  *
  *   pnpm run release                              dry run: checks + prints commands
  *   pnpm run release -- --yes                     checks, then tag v<version> + push tag
@@ -66,7 +66,7 @@ if (!existsSync(artifact)) fail(`build produced no ${OUTFILE}`);
 
 const source = readFileSync(artifact, 'utf8');
 const banner = buildMetadata();
-if (!source.startsWith(banner)) fail('artifact does not start with the §16.2 metadata block');
+if (!source.startsWith(banner)) fail('artifact does not start with the metadata block');
 if (!source.includes(DOWNLOAD_URL)) fail(`@downloadURL is not ${DOWNLOAD_URL}`);
 if (source.includes('//# sourceMappingURL')) fail('artifact embeds a sourcemap reference');
 

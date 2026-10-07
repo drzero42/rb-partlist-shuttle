@@ -1,4 +1,4 @@
-# Publishes the userscript artifact (spec §16.4).
+# Publishes the userscript artifact (spec §13).
 #
 # The pushed tag is the only publish trigger: `dist/` is gitignored, the release
 # asset is the distribution channel, and Violentmonkey auto-updates from

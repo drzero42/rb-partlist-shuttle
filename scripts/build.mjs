@@ -1,6 +1,6 @@
 /**
  * Release build: bundle src/index.js into the single self-contained userscript
- * `dist/rb-partlist-shuttle.user.js` (spec §16).
+ * `dist/rb-partlist-shuttle.user.js` (spec §12, §13).
  *
  *   pnpm run build           one-shot bundle
  *   pnpm run dev             same, in watch mode
@@ -13,9 +13,8 @@
  *   - `@version` always mirrors package.json — the artifact and the release tag
  *     can never disagree, because Violentmonkey compares `@version` against
  *     `@downloadURL` to decide whether an update exists.
- *   - `@grant` lists exactly the `GM_*` APIs src/gm.js references — pinned by a
- *     test, not scanned at build time. All network is same-origin fetch ⇒ never
- *     GM_xmlhttpRequest, never `@connect` (§16.2).
+ *   - `@inject-into page` so site fetches carry the session like the page's own
+ *     (spec §12). `GM_xmlhttpRequest` + `@connect` are for the catalogue CDN only.
  */
 
 import { readFileSync } from 'node:fs';
@@ -27,16 +26,8 @@ export const SCRIPT_FILENAME = 'rb-partlist-shuttle.user.js';
 export const OUTFILE = `dist/${SCRIPT_FILENAME}`;
 export const DOWNLOAD_URL = `${REPO_URL}/releases/latest/download/${SCRIPT_FILENAME}`;
 
-/**
- * `@grant` lines (§16.2). Declared here and pinned by test/build.test.js against
- * the `GM_*` identifiers actually referenced in src/gm.js — the only module
- * allowed to touch them (AGENTS.md) — so the list cannot drift in either
- * direction: no missing grant, no over-granting.
- */
-export const GRANTS = Object.freeze(['GM_getValue', 'GM_setValue', 'GM_addStyle', 'GM_download']);
-
-/** @grant lines that must never appear (§16.2: same-origin fetch only). */
-export const FORBIDDEN_GRANTS = Object.freeze(['GM_xmlhttpRequest']);
+/** `@grant` lines (spec §12). Only src/gm.js may use them. */
+export const GRANTS = Object.freeze(['GM_getValue', 'GM_setValue', 'GM_xmlhttpRequest']);
 
 const here = new URL('.', import.meta.url);
 const pkg = JSON.parse(readFileSync(new URL('../package.json', here), 'utf8'));
@@ -58,7 +49,9 @@ export function metadataPairs(opts) {
     ['@author', pkg.author],
     ['@match', 'https://rebrickable.com/users/*'],
     ['@run-at', 'document-idle'],
+    ['@inject-into', 'page'],
     ...grants.map((grant) => ['@grant', grant]),
+    ['@connect', 'cdn.rebrickable.com'],
     ['@downloadURL', DOWNLOAD_URL],
     ['@homepageURL', REPO_URL],
     ['@supportURL', `${REPO_URL}/issues`],
@@ -78,11 +71,7 @@ export function buildMetadata(opts) {
   return `// ==UserScript==\n${body}\n// ==/UserScript==\n`;
 }
 
-/**
- * esbuild options. `.css` is inlined as a string so gm.js can hand it to
- * GM_addStyle (§8).
- *
- * @type {import('esbuild').BuildOptions}
+/** @type {import('esbuild').BuildOptions}
  */
 export const esbuildOptions = {
   entryPoints: [fileURLToPath(new URL('../src/index.js', here))],
@@ -94,7 +83,6 @@ export const esbuildOptions = {
   minify: false,
   sourcemap: false,
   legalComments: 'none',
-  loader: { '.css': 'text' },
   banner: { js: buildMetadata() },
   logLevel: 'warning',
 };

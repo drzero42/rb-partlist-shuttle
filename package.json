@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Move exact part quantities between your Rebrickable box Part Lists and a staging Part List, in both directions, from a Custom List page.",
+  "description": "Move exact part quantities between your Rebrickable box Part Lists and a used-for-MOCs Part List, in both directions, from a Custom List page.",
   "license": "MIT",
   "author": "Anders Bøgh Bruun",
   "repository": {
