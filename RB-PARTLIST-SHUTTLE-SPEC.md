@@ -133,7 +133,9 @@ pass criterion.** HTTP 200, 2/2 parts back, and each item carries `part_num` +
   1000.
 - **Consequence:** `categoryMode: dom` is not implementable, and per the user's
   decision (2026-10-06) the return direction must **not** require an API key — so
-  category-based routing is the wrong mechanism entirely. See §12.3 item 6.
+  category-based routing is the wrong mechanism entirely. **0.1b (2026-10-07)**
+  confirmed there is no keyless source with which to revisit that: category data
+  exists only behind the keyed v3 API. See §12.3 item 6.
 
 ---
 
@@ -427,9 +429,13 @@ Run: `tools/task0-probe.js` on Part List **#1125434 `Task0 probe`** (user `drzer
 2026-10-06. Box reads during the run were read-only; every write was undone and the
 net-zero check passed (`4 baseline rows, 0 un-undone`).
 
+Second run, 2026-10-07: read-only subset `__task0({ only: ['0.1','0.1b'] })` — no
+gate, no writes; net-zero re-verified against the same 4 baseline rows.
+
 | item | verdict | outcome / adopted alternative | date |
 |------|---------|-------------------------------|------|
 | 0.1 | **FAIL** | `part_cat_id` is returned, **`part_cat_name` is not**, and the DOM fallback is dead (0 `data-part_cat_*` on the list page and in the import `html`). Follow-up read-only call: items DO carry `name` (`4592` "Lever Small Base", `4593` "Lever Small") and `/lego/part_categories/` maps id→name (`11` Bricks, `32` Bars, Ladders and Fences) — names are reachable, but only with a key. Superseded by §12.3 item 6 | 2026-10-06 |
+| 0.1b | **FAIL (no keyless source)** | Read-only hunt for a keyless part→category source. Internal endpoints: `parts/?format=json&inc_spares=0` → 200 but `text/html`, 0 bytes; `parts/json/` → **404**; `parts/?format=json&inc_part_details=1` → 200 `text/html`, 0 bytes; category-looking keys embedded in the page: **none** (`usable: null`). Re-confirmed 0.1 alongside: `part_cat_id` yes / `part_cat_name` no, mold id `48729b` served, 0 HTML attributes. **Category data is reachable only behind the keyed v3 API** → the item-6 premise is settled against category routing | 2026-10-07 |
 | 0.2 | **PASS** | omitting `fix_molds` keeps ids literal (`48729b,0` → `48729b,0`, nothing rewritten); the response `html` also echoes `Using settings: Fix Molds = False`, which the tool now asserts per write | 2026-10-06 |
 | 0.3b | **CHECK → explained** | appending `4592,1` + `4593,0` **alone** produced one line: `298c02,1`. Rebrickable collapses known components into the **composite design id** (design 298 "Lever" = 4592 base + 4593 lever) while still echoing `Fix Molds = False`. Subtracting the same two rows restored the list (`round-trip restored=true`) → the collapse is symmetric | 2026-10-06 |
 | 0.3 | **PASS + warning** | 300 rows stayed **one synchronous POST** each way (10.6s / 14.2s, no confirm/progress keys) → atomicity model holds. But the response warned `some parts were CHANGED during import: Merging 1 x part 4592 in color 1, 1 x part 4593 in color 0` **while Fix Molds = False** → §7.5 id-level verification is now mandatory | 2026-10-06 |
@@ -487,10 +493,13 @@ net-zero check passed (`4 baseline rows, 0 un-undone`).
    removes the last credential-ish surface from §10, and makes §4.4 unnecessary — at
    the cost of D8's storage-invariant framing, which becomes an optimisation instead
    of the mechanism. **Awaiting approval before §6.2/§9/§10/§4.4 are rewritten.**
-   Item 6's premise is itself untested: the part rows are drawn client-side, so a
-   keyless part→category source may exist after all — **0.1b** probes the internal
-   endpoints for one. If it finds category fields, category routing (D8) survives
-   with no key; if not, the contents/prefix mechanism above is the only option.
+   Item 6's premise was tested by **0.1b** (2026-10-07, §12.2) and failed: no
+   keyless part→category source exists anywhere session-side. Category routing (D8)
+   therefore survives only with a read-only catalog key; keylessly, the contents
+   ladder above is the only mechanism. The remaining decision is the user's:
+   (a) approve the ladder + prompt rewrite of §6.2/§9/§10/§4.4; (b) accept a
+   read-only key for Return and keep D8; (c) ship Consume and defer Return (item 3b).
+   **No routing code lands before that choice.**
 
 7. **Routing memory needs a flush story before §9 gains a key.** Whatever mechanism
    wins, anything remembered in GM storage must be *invalidate-on-read*, not

@@ -129,29 +129,34 @@ module import rules above, the fixture CSV shapes, and the release pipeline.
 verified green on a real runner via `workflow_dispatch`.
 
 **Task 0 is done** (2026-10-06, recorded in spec §12.2): 0.2/0.3/0.4/0.6 PASS,
-0.5 DECLARED, **0.1 FAIL**, and 0.3 came with a warning. §12.3 lists what that
-changed — read it before touching `rb-category.js` or the apply loop.
+0.5 DECLARED, **0.1 FAIL**, and 0.3 came with a warning. Follow-ups: **0.3b
+explained** (composite-id collapse, §12.3 item 5) and **0.1b FAIL** (2026-10-07:
+no keyless part→category source exists; categories are keyed-v3-only). §12.3 lists
+what all that changed — read it before touching `rb-category.js` or the apply loop.
 
 Confirmed by measurement, so the stubs are no longer guesses:
 - `rb-read.js`/`rb-write.js` response shapes are as now-documented in §5.2/§5.3
   (`status`/`msg`/`html`/`renders`; one synchronous POST at 300 rows, ~10-14s).
 - The CSRF token comes from the Part-List page; the cookie is HttpOnly.
 - `boxNamePattern` (`\bbox(?:es)?\b`) is validated against all 15 real lists.
+- `4592`+`4593` collapse into composite id `298c02` symmetrically while
+  `Fix Molds = False`; §6.1 must expand composite⇄component before any `missing`
+  verdict (§12.3 item 5).
 
 Needs rework before implementation:
 - `rb-category.js` is probably **deleted**: the user decided Return must not need an
-  API key, and category data is only reachable with one (§12.3 item 6). Proposed
-  replacement for §6.2 routing is box-contents based (exact → same part any colour →
-  mold-family prefix → prompt), which would also drop `categoryMode`/`apiKey` from §9.
-  Awaiting approval; do not implement either mechanism until that lands.
+  API key, and 0.1b settled that category data is only reachable with one
+  (§12.3 item 6). Candidate replacement for §6.2 routing is box-contents based
+  (exact → same part any colour → mold-family prefix → prompt), which would also
+  drop `categoryMode`/`apiKey` from §9. The routing mechanism choice is the user's
+  (§12.3 item 6: ladder / keyed D8 / defer Return); do not implement either one
+  until that lands.
 - `safety.js`: §7.5 verification is now id-level and mandatory.
-- open: reproduce the 4592/4593 merge (probe 0.3b) and record which box list 0.3
-  borrowed from, before writing §6.1's `missing` verdict.
 
 Next up per spec:
-1. Settle the §12.3 open decision (recommendation there).
+1. User picks the Return routing mechanism (ladder / keyed D8 / defer — §12.3
+   item 6); then rewrite §6.2/§9/§10/§4.4 to match, item 7 included only if a
+   memory-based hint is chosen.
 2. `csv.js` + `reconcile.js` with tests (fixture CSVs already in
    `test/fixtures/`), then I/O layers, then UI — replacing the stubs module by
    module and loosening the export-surface test as each contract settles.
-3. Run the probe's new 0.3b to reproduce the 4592/4593 merge; until it is explained,
-   §6.1's `missing` verdict must not claim absence without showing same-prefix ids.
