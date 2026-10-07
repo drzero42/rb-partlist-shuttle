@@ -4,7 +4,7 @@
  */
 
 import { parseParts, serializeParts } from './csv.js';
-import { importProblem } from './plan.js';
+import { importProblem, partListName } from './plan.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -37,8 +37,8 @@ export async function readParts(username, kind, id) {
 }
 
 /**
- * §4.3: Part Lists from the index page's root links. First non-empty link text
- * per id is the name.
+ * §4.3: Part Lists from the index page's root links, named by their link text
+ * minus the part count.
  *
  * @param {string} username
  * @returns {Promise<{id: string, name: string}[]>}
@@ -48,7 +48,7 @@ export async function listPartLists(username) {
   const byId = new Map();
   for (const a of doc.querySelectorAll(`a[href^="/users/${username}/partlists/"]`)) {
     const id = /^\/users\/[^/]+\/partlists\/(\d+)\/$/.exec(a.getAttribute('href'))?.[1];
-    const name = a.textContent.trim();
+    const name = partListName(a.textContent);
     if (id && name && !byId.has(id)) byId.set(id, { id, name });
   }
   return [...byId.values()];

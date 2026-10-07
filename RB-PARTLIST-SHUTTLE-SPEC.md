@@ -91,8 +91,9 @@ GET /users/<username>/partlists/<list_id>/parts/?format=rbpartscsv&inc_spares=0
 
 ### 4.3 Part List enumeration
 Scrape `/users/<username>/partlists/` for anchors to
-`/users/<username>/partlists/<id>/` (root links only, not sub-pages) and their
-names. Classify by name only (D4, D5).
+`/users/<username>/partlists/<id>/` (root links only, not sub-pages). Each list
+appears once, with link text `<name> (<N> parts)`; strip the count to get the
+name. Classify by name only (D4, D5).
 
 ### 4.4 Catalogue (return only)
 Public, keyless, served from `cdn.rebrickable.com` without CORS headers, so it is
@@ -222,8 +223,12 @@ Confirm is absent until every question is answered and there are no offenders.
 
 - Runs only on Custom List pages (`/users/<u>/lists/<id>/`, as a path guard at
   runtime). Rebrickable is server-rendered (no SPA routing).
-- A fixed bottom-right bar, independent of the page's markup, holds three
-  buttons:
+- Three buttons go right after the site's parts Bulk Edit button
+  (`.js-bulk-edit[data-bulk_item_type="part"]`), using the site's own
+  `rb-btn rb-btn--default` classes, because Rebrickable resets bare `<button>`
+  styling. That section loads over AJAX after the page and can be re-rendered,
+  so a `MutationObserver` attaches the buttons when Bulk Edit appears and
+  re-attaches them if they disappear. The buttons are:
   - **Consume → `<usedListName>`**
   - **Return ← `<usedListName>`**
   - **⚙** (settings)
@@ -232,7 +237,7 @@ Confirm is absent until every question is answered and there are no offenders.
 - A panel shows the progress log, then the preview with inline `<select>`
   questions (D11) and a confirm button, then the write log.
 - Settings use native `prompt()` for the two §9 config keys.
-- All injected CSS classes are prefixed `rbps-`. Styles go in via a `<style>`
+- The script's own CSS classes are prefixed `rbps-`. Styles go in via a `<style>`
   element. All text is inserted as text, never HTML.
 
 ---
@@ -274,8 +279,9 @@ development.
 | `rbpartscsv` ids round-trip byte-for-byte through Append/export | measured |
 | Appending `4592,1` + `4593,0` produced one line `298c02,1` with a `CHANGED during import` warning; subtracting the same rows restored the list | measured. Note: `298c0N` encodes the lever colour, so this is not a general colour-preserving equivalence. Handled by stopping (§5.2). |
 | No spare parts in the account, so `inc_spares=0` | declared by user |
+| Custom List export URL is `/users/<u>/lists/<id>/parts/?format=rbpartscsv&inc_spares=0` (the page's own Export link) | verified 2026-10-07 |
 | Custom List export header is `Part,Color,Quantity` | *unverified* |
-| `/users/<u>/partlists/` index lists all Part Lists as root anchors | *unverified* (the probe scraped a Part List page's sidebar instead) |
+| `/users/<u>/partlists/` index lists all Part Lists as root anchors, text `<name> (<N> parts)` | verified 2026-10-07 (all 15 lists) |
 | A Custom List page carries a usable `csrfmiddlewaretoken`; else fetch one from a Part List page | *unverified* |
 | Catalogue CDN: no CORS header, `ETag`/`Last-Modified`, 304 on conditional GET | verified 2026-10-07 |
 

@@ -4,8 +4,6 @@
  */
 
 const CSS = `
-.rbps-bar{position:fixed;right:16px;bottom:16px;z-index:10000;display:flex;gap:8px}
-.rbps-bar button,.rbps-panel button{cursor:pointer;padding:6px 12px}
 .rbps-panel{position:fixed;inset:5vh 10vw;z-index:10001;overflow:auto;padding:16px 20px;
   background:#fff;color:#222;border:1px solid #888;border-radius:6px;box-shadow:0 8px 32px #0006;font:14px/1.4 sans-serif}
 .rbps-panel table{border-collapse:collapse;margin:4px 0 12px}
@@ -21,6 +19,14 @@ function el(tag, props = {}, children = []) {
   return node;
 }
 
+/** A button styled like the site's own (Rebrickable resets bare <button>s). */
+const button = (text, onclick, icon) =>
+  el('button', { type: 'button', className: 'rb-btn rb-btn--default', onclick }, [
+    icon ? el('i', { className: `fa ${icon}` }) : '',
+    icon && text ? ' ' : '',
+    text,
+  ]);
+
 const table = (head, rows) =>
   el('table', {}, [el('tr', {}, head.map((h) => el('th', {}, h))), ...rows.map((r) => el('tr', {}, r.map((c) => el('td', {}, String(c)))))]);
 
@@ -29,13 +35,24 @@ const table = (head, rows) =>
  */
 export function injectButtons({ usedListName, onConsume, onReturn, onSettings }) {
   document.head.append(el('style', { textContent: CSS }));
-  document.body.append(
-    el('div', { className: 'rbps-bar' }, [
-      el('button', { textContent: `Consume → ${usedListName}`, onclick: onConsume }),
-      el('button', { textContent: `Return ← ${usedListName}`, onclick: onReturn }),
-      el('button', { textContent: '⚙', title: 'Part List Shuttle settings', onclick: onSettings }),
-    ]),
-  );
+  const settings = button('', onSettings, 'fa-cog');
+  settings.title = 'Part List Shuttle settings';
+  const buttons = [
+    ' ',
+    button(`Consume → ${usedListName}`, onConsume, 'fa-sign-out'),
+    ' ',
+    button(`Return ← ${usedListName}`, onReturn, 'fa-sign-in'),
+    ' ',
+    settings,
+  ];
+  // The parts section (and its Bulk Edit button) loads after the page, and can be
+  // re-rendered later, so keep watching and re-attach whenever our buttons are gone.
+  const attach = () => {
+    const bulkEdit = document.querySelector('.js-bulk-edit[data-bulk_item_type="part"]');
+    if (bulkEdit && !settings.isConnected) bulkEdit.after(...buttons);
+  };
+  new MutationObserver(attach).observe(document.body, { childList: true, subtree: true });
+  attach();
 }
 
 /** §7.1 backup: save text as a file via Blob + <a download>. */
@@ -54,7 +71,7 @@ export function openPanel(title) {
   const log = el('div');
   const body = el('div');
   const panel = el('div', { className: 'rbps-panel' }, [
-    el('button', { textContent: 'Close', style: 'float:right', onclick: () => panel.remove() }),
+    Object.assign(button('Close', () => panel.remove()), { style: 'float:right' }),
     el('h3', {}, title),
     log,
     body,
@@ -109,9 +126,9 @@ export function openPanel(title) {
           const done = (result) => (body.replaceChildren(), resolve(result));
           parts.push(
             el('p', {}, [
-              current.ready ? el('button', { textContent: 'Confirm and write', onclick: () => done(current) }) : '',
+              current.ready ? button('Confirm and write', () => done(current), 'fa-check') : '',
               ' ',
-              el('button', { textContent: 'Cancel', onclick: () => done(null) }),
+              button('Cancel', () => done(null)),
             ]),
           );
           body.replaceChildren(...parts);

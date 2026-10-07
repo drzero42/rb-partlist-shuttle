@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyLists, diffParts, expectedAfter, importProblem, planConsume, planReturn } from '../src/plan.js';
+import { classifyLists, diffParts, expectedAfter, importProblem, partListName, planConsume, planReturn } from '../src/plan.js';
 
 const config = { usedListName: 'Used for MOCs', boxNamePattern: '\\bbox(?:es)?\\b' };
 const r = (part, color, qty) => ({ part, color, qty });
@@ -182,4 +182,12 @@ describe('importProblem', () => {
     const html = `${ok.html}<br>Warnings x1 (some parts were CHANGED during import): Merging 1 x part 4592`;
     expect(importProblem({ status: 'success', html })).toMatch(/CHANGED during import/);
   });
+});
+
+it('partListName strips the part count the index page appends', () => {
+  expect(partListName('Used for MOCs (6 parts)')).toBe('Used for MOCs');
+  expect(partListName('Big storage boxes (10,180 parts)')).toBe('Big storage boxes');
+  expect(partListName('Bag (1 part)')).toBe('Bag');
+  expect(partListName('Lists (old) ')).toBe('Lists (old)');
+  expect(partListName('\n  Used for MOCs\n  (6\n parts)\n')).toBe('Used for MOCs');
 });

@@ -177,3 +177,12 @@ export function importProblem(response) {
   if (html.includes('CHANGED during import')) return `server changed part ids: ${html}`;
   return null;
 }
+
+/**
+ * §4.3: the Part List index shows names as `Used for MOCs (6 parts)`.
+ *
+ * @param {string} linkText
+ */
+export function partListName(linkText) {
+  return linkText.replace(/\s+/g, ' ').trim().replace(/ ?\([\d,.]+ parts?\)$/, '');
+}
