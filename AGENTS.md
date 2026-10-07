@@ -63,9 +63,18 @@ pnpm run dev            # watch
 pnpm run release [-- --yes]
 ```
 
-Pushing a `v*` tag publishes: `.github/workflows/release.yml` tests, builds and
-uploads the release asset. Violentmonkey auto-updates from
-`releases/latest/download/`.
+### Releasing
+
+1. Bump `version` in `package.json` (semver) and commit it. `@version` in the
+   userscript comes from there. Violentmonkey only offers an update when
+   `@version` increases, so an unbumped release reaches nobody.
+2. `pnpm run release` is a dry run: it checks and prints the commands.
+3. `pnpm run release -- --yes` tags `v<version>` and pushes the tag. It refuses a
+   dirty tree or a tag that already exists on origin.
+
+Pushing the tag is what publishes. `.github/workflows/release.yml` tests, builds,
+checks that the tag matches `package.json`, and uploads the release asset.
+Violentmonkey auto-updates from `releases/latest/download/`.
 
 ## Conventions
 
