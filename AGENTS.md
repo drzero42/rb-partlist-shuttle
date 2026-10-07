@@ -36,15 +36,16 @@ spec wins. Update this file to match it, never the other way round.
 
 ```
 src/index.js    entry + page guard
+src/csv.js      CSV parse (quotes, CRLF) + rbpartscsv rows       ┐ pure, imports only
+src/plan.js     classify lists, consume/return plans, verify diff ┘ each other; tested
 src/gm.js       the only GM_* user: config, catalogCache, xmlhttpRequest
 scripts/build.mjs   esbuild → dist/rb-partlist-shuttle.user.js + metadata banner
 scripts/release.mjs checks, tag, push (CI gate: --check)
 test/           Vitest
 ```
 
-These modules are added as they get implemented (spec §11):
-- `csv.js` and `plan.js`: pure and unit-tested. All the risky logic goes here.
-- `rb.js`, `catalog.js` and `ui.js`: thin I/O, verified on the site.
+Still to add (spec §11): `rb.js`, `catalog.js` and `ui.js`, as thin I/O
+verified on the site. Every rule worth testing belongs in `plan.js`.
 
 Don't create stub modules ahead of the code.
 
@@ -74,4 +75,6 @@ uploads the release asset. Violentmonkey auto-updates from
 
 ## Next up
 
-`csv.js` and `plan.js` with tests, then `rb.js`, `catalog.js` and `ui.js`.
+`rb.js` (site reads/writes), `catalog.js` (CDN fetch + cache) and `ui.js`
+(buttons, preview with questions, progress log, backup download, settings),
+then wire them in `index.js`.
