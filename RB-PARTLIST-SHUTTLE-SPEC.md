@@ -202,7 +202,8 @@ Confirm is absent until every question is answered and there are no offenders.
 
 1. **Backup:** before the first write, save each affected list's `rbpartscsv`
    (from the reads used for the plan) as a download, using a Blob and
-   `<a download>`. Name: `rbps-<list name>-<list id>-<UTC timestamp>.csv`. The
+   `<a download>`, into the browser's download folder (subfolders aren't
+   possible). Name: `rbps-<list name>-<list id>-<UTC timestamp>.csv`. The
    browser gives no failure signal for these downloads, so the contents also
    stay in the panel's preview tables.
 2. **Order:** all subtracts first, then all appends. A subtract on stale data
@@ -280,7 +281,7 @@ confirmed before release.
 | Custom List export URL is `/users/<u>/lists/<id>/parts/?format=rbpartscsv&inc_spares=0` (the page's own Export link) | verified 2026-10-07 |
 | Custom List export header is `Part,Color,Quantity` | verified 2026-10-07 (read accepted by the header check) |
 | `/users/<u>/partlists/` index lists all Part Lists as root anchors, text `<name> (<N> parts)` | verified 2026-10-07 |
-| A Custom List page carries a usable `csrfmiddlewaretoken`; else fetch one from a Part List page | *unverified* |
+| A usable `csrfmiddlewaretoken` is found (Custom List page, else a Part List page); consume + return round trip wrote and verified cleanly | verified 2026-10-07 |
 | Catalogue CDN: no CORS header, `ETag`/`Last-Modified`, 304 on conditional GET | verified 2026-10-07 |
 
 ---
