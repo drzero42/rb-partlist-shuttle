@@ -29,6 +29,7 @@ Two operations, mirror images of each other:
 | **Return** (take a MOC apart) | used list | box lists | which box list each row belongs in |
 
 Non-goals:
+- No spare parts: every read excludes them (`inc_spares=0`).
 - No picking list. Rebrickable's Build feature already says where bricks are.
 - No change to Build calculations or list build flags.
 - **No provenance.** The tool never records which box a brick came from. Return
@@ -275,9 +276,9 @@ confirmed before release.
 | CSRF token from a Part List page's hidden input works for repeated writes; cookie is HttpOnly | measured |
 | `rbpartscsv` ids round-trip byte-for-byte through Append/export | measured |
 | Appending `4592,1` + `4593,0` produced one line `298c02,1` with a `CHANGED during import` warning; subtracting the same rows restored the list | measured. Note: `298c0N` encodes the lever colour, so this is not a general colour-preserving equivalence. Handled by stopping (§5.2). |
-| Reads use `inc_spares=0` | *open*: a list with spare-flagged rows would hide them from the tool. Consume would then report them missing (safe, since nothing is written), and verification stays consistent because every read uses the same flag. Check whether Part List imports ever create spare rows. |
+| Reads use `inc_spares=0`: spare parts are out of scope | decided 2026-10-07. Spare-flagged rows are invisible to the tool, so consume reports them missing and writes nothing. Verification stays consistent because every read uses the same flag. |
 | Custom List export URL is `/users/<u>/lists/<id>/parts/?format=rbpartscsv&inc_spares=0` (the page's own Export link) | verified 2026-10-07 |
-| Custom List export header is `Part,Color,Quantity` | *unverified* |
+| Custom List export header is `Part,Color,Quantity` | verified 2026-10-07 (read accepted by the header check) |
 | `/users/<u>/partlists/` index lists all Part Lists as root anchors, text `<name> (<N> parts)` | verified 2026-10-07 |
 | A Custom List page carries a usable `csrfmiddlewaretoken`; else fetch one from a Part List page | *unverified* |
 | Catalogue CDN: no CORS header, `ETag`/`Last-Modified`, 304 on conditional GET | verified 2026-10-07 |
