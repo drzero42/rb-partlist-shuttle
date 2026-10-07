@@ -46,14 +46,16 @@ fresh from your lists on each run.
 ## Safety
 
 - **Preview first.** Nothing changes until you've seen exactly what will be
-  subtracted from and added to each list, and clicked **Back up and write**.
+  subtracted from and added to each list, and clicked **Back up and write**
+  (or **Write** without a backup).
 - **All or nothing.** If any part is missing or short, nothing is written, and
   the preview shows which parts.
 - **It asks instead of guessing.** For example, it asks when a part is in two
   box lists, or when a category isn't in exactly one box. Your answer applies
   to that run only.
-- **Backups.** Before writing, it downloads a CSV of every list it's about to
-  change to your browser's download folder, named
+- **Backups.** Unless you untick **Download a backup of each list first** in
+  the preview (it's ticked on every run), it downloads a CSV of every list
+  it's about to change to your browser's download folder before writing, named
   `rbps-<list name>-<list id>-<timestamp>.csv`. To undo, open that list on
   Rebrickable and use **Import → Replace** with the file.
 - **Every write is checked.** After each change, the list is re-read and
@@ -92,7 +94,8 @@ version, install the `.user.js` file from that version's
    - Answer any questions.
    - Check the box lists and non-box lists it found.
    - Expand the per-list sections to see every part.
-5. Click **Back up and write** and wait. Each list takes a few seconds, and the
+5. Leave **Download a backup of each list first** ticked (recommended), click
+   **Back up and write** (or **Write** if unticked) and wait. Each list takes a few seconds, and the
    panel shows progress.
 
 ### Settings

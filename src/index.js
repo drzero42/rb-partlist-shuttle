@@ -67,16 +67,17 @@ async function run(direction, { username, listId }) {
 
     const confirmed = await ui.preview({ plan, answers: input.answers, nameOf, questionText, notes });
     if (!confirmed) return ui.log('Cancelled. Nothing was written.');
-    await apply(ui, username, confirmed.writes, contents, nameOf, used.id);
+    await apply(ui, username, confirmed, contents, nameOf, used.id);
   } catch (error) {
     ui.fail(error.message);
   }
 }
 
-/** §7: backup, then each write in order, verified by re-reading before the next. */
-async function apply(ui, username, writes, contents, nameOf, usedId) {
+/** §7: optional backup, then each write in order, verified by re-reading before the next. */
+async function apply(ui, username, { writes, backup }, contents, nameOf, usedId) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  for (const id of new Set(writes.map((w) => w.listId))) {
+  if (!backup) ui.log('Backup skipped, as chosen in the preview.');
+  for (const id of backup ? new Set(writes.map((w) => w.listId)) : []) {
     const filename = `rbps-${nameOf(id)}-${id}-${stamp}.csv`;
     downloadText(filename, serializeParts(contents.get(id)));
     ui.log(`Backup saved to your download folder: ${filename}`);
@@ -99,13 +100,15 @@ async function apply(ui, username, writes, contents, nameOf, usedId) {
       const pending = writes.slice(i + 1).map((p) => `${p.action === 'S' ? 'Subtract from' : 'Append to'} ${nameOf(p.listId)}`);
       ui.fail(
         `${what} stopped: ${error.message}\n\nNot done: ${[what, ...pending].join('; ')}\n` +
-          `To undo, restore from the backups in your download folder (rbps-…-${stamp}.csv) ` +
-          'with Import → Replace on each list, or finish by hand.',
+          (backup
+            ? `To undo, restore from the backups in your download folder (rbps-…-${stamp}.csv) ` +
+              'with Import → Replace on each list, or finish by hand.'
+            : 'No backup was taken, so undo or finish by hand.'),
       );
       return;
     }
   }
-  ui.ok(`All writes done and verified. Backups are in your download folder (rbps-…-${stamp}.csv).`);
+  ui.ok(`All writes done and verified. ${backup ? `Backups are in your download folder (rbps-…-${stamp}.csv).` : 'No backup was taken.'}`);
 }
 
 function settings() {

@@ -24,7 +24,8 @@ spec wins. Update this file to match it, never the other way round.
   `(Part, Color, Qty)` set. `#parts_count` is a total quantity and proves nothing.
   A `CHANGED during import` warning stops the run (§5.2, §7).
 - **Sequential requests only**, back off on 429. Back up affected lists before
-  the first write. Always preview and confirm first.
+  the first write unless the user unticks the preview checkbox (ticked every
+  run, never stored). Always preview and confirm first.
 - **No API key, no password.** Site requests are same-origin `fetch` with
   `credentials: 'include'`. `GM_xmlhttpRequest` is only for
   `cdn.rebrickable.com` (the catalogue).

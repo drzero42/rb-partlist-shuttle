@@ -53,7 +53,7 @@ Non-goals:
 | D10 | Return routes by **category** (§3, §6.2), using Rebrickable's public catalogue dump, which needs no key. |
 | D11 | When the tool can't decide (a row in several boxes on consume, or a category with zero or several boxes on return), it **asks** in the preview. The answer applies to that run only. |
 | D12 | Requests are strictly sequential. 429 means back off. |
-| D13 | Every run: read everything → plan → **preview + explicit confirm** → back up affected lists → write → verify each write by re-reading. |
+| D13 | Every run: read everything → plan → **preview + explicit confirm** → back up affected lists (unless the user unticks it) → write → verify each write by re-reading. |
 
 ---
 
@@ -200,16 +200,18 @@ Confirm is absent until every question is answered and there are no offenders.
 
 ## 7. Apply and safety
 
-1. **Backup:** before the first write, save each affected list's `rbpartscsv`
+1. **Backup:** optional, on by default. The preview has a **Download a backup
+   of each list first** checkbox, ticked on every run (the choice is never
+   stored, §9). When ticked, before the first write, save each affected list's `rbpartscsv`
    (from the reads used for the plan) as a download, using a Blob and
    `<a download>`, into the browser's download folder (subfolders aren't
    possible). Name: `rbps-<list name>-<list id>-<UTC timestamp>.csv`. The
    user is told at each step:
    - the preview names the lists that will be backed up and where to, next to a
-     **Back up and write** button;
+     **Back up and write** button (**Write** when the box is unticked);
    - the log names each saved file;
    - the final or stop message says where the backups are and how to restore
-     them (Import → Replace). The
+     them (Import → Replace), or, when unticked, that no backup was taken. The
    browser gives no failure signal for these downloads, so the contents also
    stay in the panel's preview tables.
 2. **Order:** all subtracts first, then all appends. A subtract on stale data
@@ -217,11 +219,12 @@ Confirm is absent until every question is answered and there are no offenders.
 3. **Sequential:** one request at a time. On 429, wait (`Retry-After` or
    1 s / 2 s / 4 s), then stop after three tries.
 4. **Verify every write:** re-read that list and compare its full
-   `(Part, Color, Qty)` set to *backup ± this write's rows*. Any difference,
+   `(Part, Color, Qty)` set to *the list as read for the plan ± this write's
+   rows*. This holds whether or not a backup was downloaded. Any difference,
    including an id rewrite, stops the run before the next write.
 5. **On stop:** show which writes completed, which didn't, the server `html`, and
    the diff. No automatic resume or rollback. The user restores from the backups
-   (Import → Replace) or finishes by hand.
+   (Import → Replace), if any, or finishes by hand.
 6. **Progress log:** each write takes ~10–15 s at 300 rows, so show which list is
    in flight.
 
@@ -243,7 +246,8 @@ Confirm is absent until every question is answered and there are no offenders.
 
   Labels use the configured name.
 - A panel shows the progress log, then the preview with inline `<select>`
-  questions (D11) and a confirm button, then the write log.
+  questions (D11), the backup checkbox (§7.1) and a confirm button, then the
+  write log.
 - Settings use native `prompt()` for the two §9 config keys.
 - The script's own CSS classes are prefixed `rbps-`. Styles go in via a `<style>`
   element. All text is inserted as text, never HTML.

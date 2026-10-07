@@ -86,7 +86,8 @@ export function openPanel(title) {
 
     /**
      * §6.3 preview. Re-plans whenever a question is answered. Resolves with the
-     * final plan on confirm, or null on cancel.
+     * final plan plus `backup` (§7.1 checkbox, ticked every run) on confirm, or
+     * null on cancel.
      *
      * @param {{plan: () => any, answers: Map<string, string>, nameOf: (id: string) => string,
      *   questionText: (key: string) => string, notes: string[]}} opts
@@ -95,6 +96,7 @@ export function openPanel(title) {
       return new Promise((resolve) => {
         // Answered questions drop out of the plan; keep showing them so they stay changeable.
         const asked = new Map();
+        let backup = true;
         const render = () => {
           const current = plan();
           const parts = [el('ul', {}, notes.map((n) => el('li', {}, n)))];
@@ -128,15 +130,23 @@ export function openPanel(title) {
             const changing = [...new Set(current.writes.map((w) => w.listId))].map(nameOf).join(', ');
             parts.push(
               el('p', {}, [
+                el('label', {}, [
+                  el('input', { type: 'checkbox', checked: backup, onchange: (e) => ((backup = e.target.checked), render()) }),
+                  ' Download a backup of each list first',
+                ]),
+              ]),
+              el('p', {}, [
                 el('strong', {}, 'Backups: '),
-                `confirming first downloads a CSV backup of each list that will change (${changing}) ` +
-                  "to your browser's download folder. To undo, open a list and use Import → Replace with its backup.",
+                backup
+                  ? `confirming first downloads a CSV backup of each list that will change (${changing}) ` +
+                      "to your browser's download folder. To undo, open a list and use Import → Replace with its backup."
+                  : `none. ${changing} will change with no backup to restore from.`,
               ]),
             );
           }
           parts.push(
             el('p', {}, [
-              current.ready ? button('Back up and write', () => done(current), 'fa-check') : '',
+              current.ready ? button(backup ? 'Back up and write' : 'Write', () => done({ ...current, backup }), 'fa-check') : '',
               ' ',
               button('Cancel', () => done(null)),
             ]),
